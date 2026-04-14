@@ -1,0 +1,5 @@
+# oh-my-algorithm state
+.oma/experiments/
+.oma/leaderboard.json
+.oma/best.json
+.oma/trajectory.jsonl

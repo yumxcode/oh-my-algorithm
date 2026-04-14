@@ -1,0 +1,148 @@
+"""
+Test 01: Latency Analysis
+Reads results.json produced by measure.py and generates a markdown report.
+
+Usage: python analyze.py [--results results.json] [--out report.md]
+"""
+import json
+import argparse
+import numpy as np
+from pathlib import Path
+
+
+PASS_COLOR  = "✅"
+WARN_COLOR  = "⚠️"
+FAIL_COLOR  = "❌"
+
+
+def gate(value, warn_thresh, fail_thresh, higher_is_worse=True):
+    if higher_is_worse:
+        if value >= fail_thresh: return FAIL_COLOR
+        if value >= warn_thresh: return WARN_COLOR
+        return PASS_COLOR
+    else:
+        if value <= fail_thresh: return FAIL_COLOR
+        if value <= warn_thresh: return WARN_COLOR
+        return PASS_COLOR
+
+
+def main(results_path: str, out_path: str):
+    with open(results_path) as f:
+        r = json.load(f)
+
+    lat = np.array(r["latencies_ms"])
+    hz  = r["control_hz"]
+    period_ms = 1000.0 / hz
+
+    # ── Derived metrics ───────────────────────────────────────────────────────
+    pct_over_period = float(np.mean(lat > period_ms) * 100)
+    jitter_ms       = float(lat.std())
+
+    # Budget thresholds (warn at 30%, fail at 50% of control period)
+    warn_ms = period_ms * 0.30
+    fail_ms = period_ms * 0.50
+
+    sim_ms  = r.get("sim_latency_ms")
+    gap_p99 = r["p99_ms"] - sim_ms if sim_ms else None
+
+    # ── Build report ──────────────────────────────────────────────────────────
+    lines = [
+        "# Test 01 — Latency Analysis Report",
+        "",
+        f"**Control rate**: {hz} Hz  (period = {period_ms:.2f} ms)",
+        f"**Samples**: {r['n_samples']}",
+        "",
+        "## Latency Summary",
+        "",
+        "| Metric | Value | Status |",
+        "|--------|-------|--------|",
+        f"| Mean   | {r['mean_ms']:.2f} ms | {gate(r['mean_ms'], warn_ms, fail_ms)} |",
+        f"| Std    | {r['std_ms']:.2f} ms  | — |",
+        f"| p50    | {r['p50_ms']:.2f} ms | {gate(r['p50_ms'], warn_ms, fail_ms)} |",
+        f"| p95    | {r['p95_ms']:.2f} ms | {gate(r['p95_ms'], warn_ms, fail_ms)} |",
+        f"| p99    | {r['p99_ms']:.2f} ms | {gate(r['p99_ms'], warn_ms, fail_ms)} |",
+        f"| Max    | {r['max_ms']:.2f} ms | {gate(r['max_ms'], warn_ms, fail_ms)} |",
+        f"| % over period | {pct_over_period:.1f}% | {gate(pct_over_period, 1.0, 5.0)} |",
+        "",
+    ]
+
+    if sim_ms:
+        lines += [
+            "## Sim → Real Gap",
+            "",
+            f"| | Sim model | Real p99 | Gap |",
+            f"|---|---|---|---|",
+            f"| Latency | {sim_ms:.2f} ms | {r['p99_ms']:.2f} ms | {gap_p99:+.2f} ms |",
+            "",
+        ]
+        if gap_p99 > period_ms * 0.20:
+            lines += [
+                f"> **⚠️ Gap ({gap_p99:.2f} ms) exceeds 20% of control period.**",
+                "> Consider revisiting sim dynamics model or reducing policy inference cost.",
+                "",
+            ]
+
+    # ── Histogram (ASCII) ─────────────────────────────────────────────────────
+    lines += ["## Distribution (ASCII histogram)", ""]
+    bins   = np.linspace(lat.min(), min(lat.max(), period_ms * 1.5), 20)
+    counts, edges = np.histogram(lat, bins=bins)
+    max_c  = max(counts) or 1
+    for i, c in enumerate(counts):
+        bar   = "█" * int(c / max_c * 30)
+        label = f"{edges[i]:.1f}–{edges[i+1]:.1f} ms"
+        lines.append(f"  {label:>18}  {bar}  ({c})")
+    lines.append("")
+
+    # ── Design feedback ───────────────────────────────────────────────────────
+    lines += ["## Design Feedback", ""]
+    if pct_over_period > 5.0:
+        lines += [
+            "- **FB-L1**: >5% of inference calls exceed the control period.",
+            "  Hypothesis: policy network too large for onboard compute.",
+            "  Recommendation: (a) distill to a smaller network, (b) quantize weights,",
+            "  (c) reduce observation dimensionality in $design.",
+            "",
+        ]
+    if gap_p99 and gap_p99 > period_ms * 0.10:
+        lines += [
+            "- **FB-L2**: Sim latency model underestimates real hardware by "
+            f"{gap_p99:.1f} ms.",
+            "  Recommendation: update `sim_latency_ms` in deploy-config.json and",
+            "  re-examine whether sim training used realistic communication delays.",
+            "",
+        ]
+    if jitter_ms > period_ms * 0.10:
+        lines += [
+            "- **FB-L3**: High inference jitter (std = {:.2f} ms).".format(jitter_ms),
+            "  Hypothesis: OS scheduling noise or GPU memory contention.",
+            "  Recommendation: pin inference thread, pre-allocate tensors, or use",
+            "  a real-time kernel.",
+            "",
+        ]
+    if not any("FB-" in l for l in lines):
+        lines.append("- Latency within acceptable bounds. No design changes required.")
+        lines.append("")
+
+    lines += [
+        "## Verdict",
+        "",
+        f"- Mean latency: {r['mean_ms']:.2f} ms / {period_ms:.2f} ms period = "
+        f"{r['mean_ms']/period_ms*100:.1f}% budget used",
+        f"- Samples exceeding period: {pct_over_period:.1f}%",
+        "",
+        "_Generated by analyze.py — Test 01 Latency_",
+    ]
+
+    report = "\n".join(lines)
+    Path(out_path).write_text(report)
+    print(f"Report written → {out_path}")
+    print(f"Mean={r['mean_ms']:.2f}ms  p99={r['p99_ms']:.2f}ms  "
+          f"over-period={pct_over_period:.1f}%")
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--results", default="results.json")
+    ap.add_argument("--out",     default="report.md")
+    args = ap.parse_args()
+    main(args.results, args.out)

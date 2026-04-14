@@ -1,0 +1,65 @@
+{
+  "_comment": "deploy-config.json — fill in before running any deploy-tests script",
+
+  // ── Robot identity ─────────────────────────────────────────────────────────
+  "robot_name": "my_robot",
+  "design_id":  "design-YYYYMMDD-001",   // must match .oma/designs/design-{id}.md
+
+  // ── Control ────────────────────────────────────────────────────────────────
+  "control_hz": 50,            // low-level policy inference rate (Hz)
+  "target_speed_mps": 0.8,     // nominal forward speed for speed/gait/disturbance tests
+
+  // ── Joints ─────────────────────────────────────────────────────────────────
+  "joint_names": [
+    "LHipYaw", "LHipRoll", "LHipPitch", "LKnee", "LAnklePitch", "LAnkleRoll",
+    "RHipYaw", "RHipRoll", "RHipPitch", "RKnee", "RAnklePitch", "RAnkleRoll"
+  ],
+
+  // Sim PD gains from design — update after Test 02 with real measured values
+  "kp_sim": {
+    "LHipYaw": 80,  "LHipRoll": 80,  "LHipPitch": 100,
+    "LKnee":   100, "LAnklePitch": 40, "LAnkleRoll": 40,
+    "RHipYaw": 80,  "RHipRoll": 80,  "RHipPitch": 100,
+    "RKnee":   100, "RAnklePitch": 40, "RAnkleRoll": 40
+  },
+  "kd_sim": {
+    "LHipYaw": 5, "LHipRoll": 5, "LHipPitch": 5,
+    "LKnee":   5, "LAnklePitch": 2, "LAnkleRoll": 2,
+    "RHipYaw": 5, "RHipRoll": 5, "RHipPitch": 5,
+    "RKnee":   5, "RAnklePitch": 2, "RAnkleRoll": 2
+  },
+
+  // ── Feet ────────────────────────────────────────────────────────────────────
+  "foot_names": ["LF", "RF", "LH", "RH"],
+
+  // Gait model from sim (Test 05 compares against these)
+  "sim_step_freq_hz": 2.5,
+  "sim_duty_cycle": {
+    "LF": 0.55, "RF": 0.55,
+    "LH": 0.55, "RH": 0.55
+  },
+
+  // ── Latency (Test 01) ──────────────────────────────────────────────────────
+  "sim_latency_ms": 4.0,       // modelled obs→action latency in sim
+
+  // ── Noise model (Test 03) ──────────────────────────────────────────────────
+  // Update these after Test 03 with real measured values
+  "sim_noise_std": {
+    "gyro_x": 0.01,  "gyro_y": 0.01,  "gyro_z": 0.01,
+    "accel_x": 0.05, "accel_y": 0.05, "accel_z": 0.05,
+    "joint_position": 0.005
+  },
+
+  // Observation channel names (must match model's obs vector ordering from design)
+  "obs_names": null,           // e.g. ["base_roll", "base_pitch", "j0_pos", ...]
+
+  // ── Speed test (Test 06) ───────────────────────────────────────────────────
+  "speed_steps_mps": [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5],
+  "design_max_speed_mps": 1.5,
+
+  // ── Deployment metadata ───────────────────────────────────────────────────
+  "deployed_at": null,         // ISO timestamp — filled in by $deploy
+  "checkpoint_ref": null,      // path or URL of deployed model checkpoint
+  "firmware_version": null,
+  "notes": ""
+}

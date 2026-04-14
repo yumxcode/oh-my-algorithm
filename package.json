@@ -1,0 +1,32 @@
+{
+  "name": "oh-my-algorithm",
+  "version": "0.1.0",
+  "description": "Algorithm development workflow orchestration layer for Codex CLI",
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "oma": "./bin/oma.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "skills/",
+    "templates/",
+    "AGENTS.md"
+  ],
+  "scripts": {
+    "setup": "node bin/oma.js setup",
+    "doctor": "node bin/oma.js doctor",
+    "status": "node bin/oma.js status"
+  },
+  "keywords": [
+    "codex",
+    "algorithm",
+    "ml",
+    "workflow",
+    "agent"
+  ]
+}
