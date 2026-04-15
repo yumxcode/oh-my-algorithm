@@ -5,6 +5,7 @@
 **Gate in**: `.oma/knowledge.md` must exist and contain `Status: LOCKED`.
 **Standalone entry**: Allowed via `oma go design`. If knowledge.md is missing, ask the user for: task description, sim environment, hardware target, primary metric.
 **Gate out**: Creates `.oma/designs/design-{id}.md`. Gate to `$implement` opens only after this file exists.
+**Experience library**: A global experience library may exist at `~/.oma/experiences.jsonl` with successful design practices from past projects (reward structures, DR ranges, architecture choices, etc.). If querying it would help a decision, run: `oma xp search "<topic>" --stage design`. This is optional — use your judgment.
 
 ---
 

@@ -23,6 +23,7 @@ const { go }      = require('../src/commands/go');
 const { doctor }  = require('../src/commands/doctor');
 const { status }  = require('../src/commands/status');
 const { logCmd }  = require('../src/commands/log');
+const { xp }      = require('../src/commands/experience');
 const { log, err, blank, color } = require('../src/utils/print');
 
 const pkg  = require('../package.json');
@@ -58,6 +59,7 @@ const HELP = {
     ${color.cyan('doctor')}                       Check gate chain status and workspace health
     ${color.cyan('status')}                       Show leaderboard, current phase, memory snapshot
     ${color.cyan('log')}                          Pretty-print the experiment trajectory
+    ${color.cyan('xp <sub>')}                     Global experience library (add / list / search / show / delete)
     ${color.cyan('version')}                      Print version
     ${color.cyan('help [command]')}               Show help for a command
 
@@ -127,6 +129,38 @@ const HELP = {
     oma go train --reason "testing infra"
     oma go off                            # return to normal gated flow
     oma go status                         # check if standalone mode is active
+
+  ${color.bold('Experience library:')}
+    oma xp add --stage design             # save a design experience after a session
+    oma xp search "reward hacking"        # query past experiences (Codex calls this)
+    oma xp list --stage tune              # list all tune-stage experiences
+`,
+
+  xp: `
+  ${color.bold('oma xp')} — Global experience library (~/.oma/experiences.jsonl)
+
+  Accumulates successful practices across projects for design, tune, and deploy
+  stages. Codex is informed of the library at stage entry and queries it on demand.
+
+  ${color.bold('Subcommands:')}
+    ${color.cyan('add [--stage <stage>]')}          Interactive: fill fields and append one entry
+    ${color.cyan('list [--stage <s>] [--tag <t>]')} List experiences (table view)
+    ${color.cyan('search <query> [--stage <s>]')}   Full-text search (used by Codex inside sessions)
+    ${color.cyan('show <id>')}                      Full detail for one entry
+    ${color.cyan('delete <id>')}                    Remove one entry
+
+  ${color.bold('Valid stages:')} design, tune, deploy
+
+  ${color.bold('Options:')}
+    --format md             Output as Markdown (default for search, used by Codex)
+    --format table          Output as table (default for list)
+
+  ${color.bold('Examples:')}
+    oma xp add --stage design
+    oma xp search "reward hacking" --stage tune
+    oma xp list --stage deploy --format md
+    oma xp show tune-003
+    oma xp delete design-001
 `,
 
   doctor: `
@@ -338,6 +372,25 @@ async function main() {
         verbose: hasFlag('--verbose', '-v'),
       });
       break;
+
+    case 'xp': {
+      if (hasFlag('-h', '--help')) { log(HELP.xp); return; }
+      // Parse xp-specific flags
+      const xpFlags = {};
+      const xpArgs  = [];
+      for (let i = 1; i < args.length; i++) {
+        if (args[i].startsWith('--') && args[i + 1] && !args[i + 1].startsWith('--')) {
+          xpFlags[args[i]] = args[i + 1];
+          i++;
+        } else if (args[i].startsWith('--')) {
+          xpFlags[args[i]] = true;
+        } else {
+          xpArgs.push(args[i]);
+        }
+      }
+      await xp(xpArgs, xpFlags);
+      break;
+    }
 
     case 'version':
     case '--version':

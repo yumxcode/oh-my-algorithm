@@ -25,6 +25,8 @@ Skill prompts under `skills/*/SKILL.md` are narrower execution surfaces and must
 
 Skipping this protocol wastes compute on already-proven dead ends. This is the highest-cost mistake in robot algorithm development.
 
+4. (Optional) A global experience library may exist at `~/.oma/experiences.jsonl` — accumulated successful practices from past projects. The `$design`, `$tune`, and `$deploy` skills will each remind you of this. You decide if and when to query it via `oma xp search "<topic>"`.
+
 ---
 
 <operating_principles>

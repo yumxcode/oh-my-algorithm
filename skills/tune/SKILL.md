@@ -11,6 +11,7 @@ This skill subsumes the former `$evaluate` skill. Final test-set evaluation is t
 **Gate in**: At least one `experiments/{exp-id}/results.json` with `phase: train` exists.
 **Standalone entry**: Allowed via `oma go tune`. If no prior train results exist, ask user: "Do you have existing experiment results to sweep from? If yes, provide exp-id and metric. If no, we'll run a first baseline first."
 **Gate out**: `.oma/best.json` written with `deployGateOpen` field set. Appends to `trajectory.jsonl`. **Automatically triggers `$consolidate`.**
+**Experience library**: A global experience library may exist at `~/.oma/experiences.jsonl` with successful tuning practices from past projects (effective hyperparameter ranges, convergence tricks, ablation findings, etc.). If querying it would help, run: `oma xp search "<topic>" --stage tune`. This is optional — use your judgment.
 
 ---
 

@@ -7,6 +7,7 @@ The output is a `design-feedback.md` that contains concrete, evidence-backed hyp
 **Gate in**: `.oma/best.json` with `deployGateOpen: true`.
 **Standalone entry**: Allowed via `oma go deploy`. If `best.json` is missing, ask: "Which checkpoint are you deploying? Provide: (1) checkpoint path or URL, (2) robot model, (3) control_hz, (4) did it pass sim evaluation?" Then proceed — the deploy gate warning is shown but not blocking.
 **Gate out**: `deploy/deploy-checklist.md` with all mandatory items `✓`.
+**Experience library**: A global experience library may exist at `~/.oma/experiences.jsonl` with sim2real findings from past projects (known gap ranges, Kp/Kd adjustment patterns, test-category-specific issues, etc.). If querying it would help, run: `oma xp search "<topic>" --stage deploy`. This is optional — use your judgment.
 
 ---
 
