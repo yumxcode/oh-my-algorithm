@@ -1,497 +1,505 @@
 # Skill: $deploy
 
-**Purpose**: Sim2Real validation and iterative hardware deployment for robot locomotion algorithms. This skill does NOT simply package a model — it drives a structured test campaign on real hardware, generates per-test measurement and analysis code, interprets results, and closes the loop back to `$design`.
-
-The output is a `design-feedback.md` that contains concrete, evidence-backed hypotheses for the next design iteration — as important as any passing test.
+**Purpose**: Drive a structured, round-based sim2real validation campaign on real hardware for a deployed robot locomotion policy. This skill does NOT simply package a model — it generates a rich deployment contract (`deploy_info.json`), maintains a living checklist (`sim2real_checklist.md`), guides each hardware session through staged safety gates, records results per round, and generates per-issue identification plans when problems arise. The output is a field-tested set of adapted parameters and a `design-feedback.md` for the next iteration.
 
 **Gate in**: `.oma/best.json` with `deployGateOpen: true`.
-**Standalone entry**: Allowed via `oma go deploy`. If `best.json` is missing, ask: "Which checkpoint are you deploying? Provide: (1) checkpoint path or URL, (2) robot model, (3) control_hz, (4) did it pass sim evaluation?" Then proceed — the deploy gate warning is shown but not blocking.
-**Gate out**: `deploy/deploy-checklist.md` with all mandatory items `✓`.
-**Experience library**: A global experience library may exist at `~/.oma/experiences.jsonl` with sim2real findings from past projects (known gap ranges, Kp/Kd adjustment patterns, test-category-specific issues, etc.). If querying it would help, run: `oma xp search "<topic>" --stage deploy`. This is optional — use your judgment.
+**Standalone entry**: Allowed via `oma go deploy`. If `best.json` is missing, ask: "Which checkpoint are you deploying? Provide: (1) policy file path, (2) robot model, (3) control_hz, (4) did it pass sim evaluation?" Then proceed with a `⚠️ STANDALONE` notice.
+**Gate out**: `deploy/sim2real_checklist.md` with all mandatory stages `✓ completed`.
+**Experience library**: A global library may exist at `~/.oma/experiences.jsonl`. Query with: `oma xp search "<topic>" --stage deploy`.
 
 ---
 
-## The Sim2Real Loop
+## The Real Sim2Real Loop
 
 ```
-$deploy ─── Phase 1: Identify sim2real gaps (from design + results)
+$deploy ─── Phase 0:   Read source code → understand the full deployment stack
               ↓
-            Phase 2: Generate test plan (which tests, what order)
+            Phase 0.5: Generate deploy_info.json (deployment contract)
               ↓
-            Phase 3: Generate test code (measure + analyze per test)
+            Phase 0.6: Create/update sim2real_checklist.md (living state doc)
               ↓
-            Phase 4: Execute on hardware (safety-first)
+            Phase 1:   Sim2Real gap analysis → sim2real-gap.md
               ↓
-            Phase 5: Analyze results (quantify gaps, classify failures)
+            Phase 2:   Plan next hardware session → sim2real/plans/{plan_name}.md
               ↓
-            Phase 6: Design feedback (hypotheses for next $design)
+            Phase 3:   Execute session (operator + Codex in real-time)
               ↓
-            Phase 7: Deployment decision
-                ├── Gap acceptable → package + deploy
-                └── Gap too large → feed back to $design and exit $deploy
+            Phase 4:   Record results → sim2real/results/round_{NN}_{desc}.md
+              ↓
+            Phase 5:   Update checklist + draw conclusions
+              ↓
+            Phase 6:   If issues found → generate identification plan → GOTO Phase 2
+                        If stage passed → advance to next stage → GOTO Phase 2
+                        If all stages passed → GOTO Phase 7
+              ↓
+            Phase 7:   Design feedback + deployment decision
 ```
+
+**Key difference from a standard workflow**: Real robot testing happens in discrete **rounds** (physical hardware sessions). Each round has a pre-session plan and a post-session result file. Codex assists both before the session (planning) and after (interpreting results, deciding next steps). Do not try to compress all stages into one session.
 
 ---
 
-## Phase 0 — Context Loading
+## Phase 0 — Read the Full Deployment Stack
 
-| File | Required | What to extract |
-|------|----------|-----------------|
-| `.oma/best.json` | ✓ | `expId`, checkpoint paths, `deployGateOpen` |
-| `.oma/requirements.md` | ✓ | Task type, action/obs space, target hardware, real-world success criteria |
-| `.oma/designs/design-{id}.md` | ✓ | Architecture, domain randomization ranges, sim parameters used |
-| `.oma/memory.md` | ✓ | Past sim2real failure modes (Dead Ends section) |
-| `experiments/{exp-id}/eval-results.json` | ✓ | Sim test metrics — the baseline to compare against |
+Before generating any artifact, read the actual source files that define the deployment. The information in these files is ground truth — it overrides any assumptions from `design-{id}.md`.
 
-From `requirements.md` and `design-{id}.md`, extract the **sim parameters** used during training:
-- Motor Kp/Kd ranges
-- Observation noise std
-- Latency / delay modelling
-- Friction, inertia, mass randomization ranges
-- Contact model settings
+**What to read**:
 
-These define the sim2real gap hypotheses.
+| File type | What to extract |
+|-----------|----------------|
+| Policy file (`.onnx`, `.pt`, `.jit`) | File path, existence check |
+| Control config (`.yaml`, `.json`) | `control_hz`, joint names, `stiffness`, `damping`, `init_state`, `obs_scales`, `action_scale`, `lpf_conf`, `cmd_threshold`, `cycle_time`, `decimation` |
+| Controller source (`.cc`, `.cpp`, `.py`) | Obs vector construction order, action-to-joint mapping, torque vs position control per joint, LPF logic, ROS topic names |
+| MJCF / URDF | Joint chain order, joint limits, link masses, foot frame names |
+| README / deployment notes | Any known caveats, required hardware setup, start sequence |
+
+**How to read source files**:
+- Use `oma search` or direct file reads to extract the above.
+- If the user said `oma go deploy --reason "..."`, the reason tells you what stage they're entering at and what's already done.
+- If running in standalone mode, ask ONE question for any missing critical field (e.g., "What is the path to the policy file and config yaml?").
+
+---
+
+## Phase 0.5 — Generate deploy_info.json (Deployment Contract)
+
+Generate `deploy/deploy_info.json` from the source files read in Phase 0. This is the single source of truth for the entire deploy stage. All subsequent phases reference this file.
+
+**Template** (`templates/deploy_info_template.json` if it exists, otherwise build from scratch):
+
+```json
+{
+  "schema_version": "1.0",
+  "generated_from": {
+    "policy_file_repo_path": "<path to .onnx/.pt in repo>",
+    "control_config_repo_path": "<path to config yaml>",
+    "controller_source_repo_path": "<path to controller .cc/.py>",
+    "mjcf_repo_path": "<path to .xml or .urdf>"
+  },
+  "deployment_target": {
+    "controller_name": "<controller identifier>",
+    "control_frequency_hz": <hz>,
+    "subscribe_topics": { "<topic_name>": "<ros_topic>" },
+    "publish_topics": { "<topic_name>": "<ros_topic>" }
+  },
+  "model_contract": {
+    "policy_file": "<deployed path>",
+    "actions_size": <n_joints>,
+    "observations_size": <single_frame_obs_dim>,
+    "num_hist": <history_frames>,
+    "stacked_observations_size": <observations_size * num_hist>,
+    "observations_clip": <clip_value>,
+    "actions_clip": <clip_value>
+  },
+  "joint_order": {
+    "description": "Action output order must match joint_list order exactly.",
+    "action_joint_list": ["<joint_0>", "<joint_1>", "..."]
+  },
+  "rl_walk_params": {
+    "init_state": [<per-joint values in action_joint_list order>],
+    "stiffness": [<kp per joint>],
+    "damping": [<kd per joint>],
+    "walk_step_conf": {
+      "action_scale": <float>,
+      "decimation": <int>,
+      "cycle_time": <float>,
+      "cmd_threshold": <float>
+    },
+    "obs_scales": {
+      "lin_vel": <float>, "ang_vel": <float>,
+      "dof_pos": <float>, "dof_vel": <float>
+    },
+    "lpf_conf": {
+      "wc": <cutoff_hz>,
+      "ts": <1/control_hz>,
+      "parallel_joints": ["<ankle_joints...>"]
+    }
+  },
+  "observation_contract": {
+    "description": "Single-frame obs layout, concatenated then stacked.",
+    "single_frame_layout": [
+      {"name": "<channel_name>", "size": <int>},
+      "..."
+    ],
+    "single_frame_total": <observations_size>,
+    "stack_rule": "<description of how history buffer is built>"
+  },
+  "action_to_command_mapping": {
+    "position_target_formula": "pos_des = action[i] * action_scale + init_state[i]",
+    "postprocess": ["<step 1>", "<step 2 — e.g. parallel/series joint distinction>"]
+  },
+  "sim2real_focus": {
+    "goal": "Use staged real-robot tests to identify which deployment-side parameters need adaptation without changing the trained policy first.",
+    "recommended_test_sequence": [
+      {
+        "stage": "sensor_and_sign_check",
+        "purpose": "Verify sensor links, joint order, joint sign, zero offsets before enabling RL.",
+        "watch_items": ["Joint sign matches intended positive direction", "IMU axes consistent with controller frame", "joint_offset and zeroing correct", "Command directions produce expected motion"],
+        "primary_tuning_targets": ["joint_offset", "joint_limits", "topic mapping / sensor frame"]
+      },
+      {
+        "stage": "stand_transition",
+        "purpose": "Check zero → stand and hold stability before RL.",
+        "watch_items": ["Overshoot during transition", "High-frequency oscillation in hips/knees/ankles", "Steady-state pose bias", "Motor heating"],
+        "primary_tuning_targets": ["pd_zero stiffness/damping", "pd_stand stiffness/damping", "joint_offset"]
+      },
+      {
+        "stage": "rl_idle_and_in_place_step",
+        "purpose": "Enable RL with zero or small velocity command; observe calm behavior.",
+        "watch_items": ["Stepping at zero command (cmd_threshold issue)", "Ankle chatter from torque-mode joints", "Action saturation", "LPF delay vs responsiveness"],
+        "primary_tuning_targets": ["cmd_threshold", "lpf_conf.wc", "ankle stiffness/damping", "action_scale"]
+      },
+      {
+        "stage": "low_speed_walk",
+        "purpose": "Forward walking at conservative speed on flat ground.",
+        "watch_items": ["Step length too large/small", "Toe scuffing", "Body pitch/roll drift", "Velocity tracking lag", "Left/right asymmetry"],
+        "primary_tuning_targets": ["action_scale", "cycle_time", "obs_scales.lin_vel", "leg stiffness/damping"]
+      },
+      {
+        "stage": "lateral_and_yaw",
+        "purpose": "Test lateral and yaw commands after forward walking is stable.",
+        "watch_items": ["Yaw-roll coupling", "Lateral slip", "Turning overshoot"],
+        "primary_tuning_targets": ["obs_scales.lin_vel", "obs_scales.ang_vel", "action_scale", "cycle_time"]
+      },
+      {
+        "stage": "disturbance_and_contact_robustness",
+        "purpose": "Pushes and varied floor surfaces after stable baseline walk.",
+        "watch_items": ["Recovery delay", "Ankle saturation", "Foot slap on landing", "Instability after impact"],
+        "primary_tuning_targets": ["ankle stiffness/damping", "lpf_conf.wc", "joint_limits", "action_scale"]
+      }
+    ],
+    "symptom_to_parameter_hints": [
+      {"symptom": "Too aggressive / step amplitude too large", "check": ["action_scale too high", "stiffness too high", "cycle_time too short"]},
+      {"symptom": "Sluggish / drags feet / fails to commit", "check": ["action_scale too low", "stiffness too low", "damping too high", "lpf_conf.wc too low"]},
+      {"symptom": "High-frequency oscillation or chatter", "check": ["stiffness too high", "damping too low", "IMU/joint velocity noise", "lpf_conf.wc too high"]},
+      {"symptom": "Ankle torque joints vibrate under load", "check": ["ankle kp/kd mismatch", "lpf_conf.wc not suitable for torque-mode path", "joint offset or sign error"]},
+      {"symptom": "Zero command still causes stepping", "check": ["cmd_threshold too small", "joystick deadband mismatch", "cmd topic residual noise"]}
+    ]
+  }
+}
+```
+
+**Fill-in rules**:
+- Read `stiffness`, `damping`, `init_state` directly from the control config yaml — do not infer.
+- Read joint order from the config — the order must exactly match the policy's output dimension.
+- Read `parallel_joints` from the controller source (the joints that use torque-mode instead of position-mode).
+- Build `observation_contract` by parsing the controller source's obs construction loop.
+- Save to `deploy/deploy_info.json`.
+
+---
+
+## Phase 0.6 — Create sim2real_checklist.md (Living State Document)
+
+Create `deploy/sim2real_checklist.md`. This file is updated after EVERY hardware round. It is the primary state tracker for the entire deploy stage.
+
+```markdown
+# Sim2Real Checklist
+_Algorithm: {design_id} | Hardware: {robot_name} | Policy: {policy_file}_
+
+关联资料:
+- 部署基线: deploy/deploy_info.json
+- RL 配置: {control_config_path}
+- 控制器: {controller_source_path}
+
+## 文档结构
+- 总体 checklist: 本文件
+- 具体方案: deploy/sim2real/plans/
+- 每轮结果: deploy/sim2real/results/
+
+## 当前状态
+| 项目 | 当前值 |
+|---|---|
+| 当前 sim2real 轮次 | Round 1 |
+| 当前轮状态 | not started |
+| 当前重点 | sensor_and_sign_check |
+
+## 阶段总览
+| 阶段 | 状态 | 目标 | 方案 | 最近结果 |
+|---|---|---|---|---|
+| sensor_and_sign_check | pending | 传感器/关节/符号验证 | 待创建 | 待更新 |
+| stand_transition | pending | 站立稳定 | 待创建 | 待更新 |
+| rl_idle_and_in_place_step | pending | RL 零速基础行为 | 待创建 | 待更新 |
+| [parameter_identification] | — | 按需插入 | — | — |
+| low_speed_walk | pending | 低速直行 | 待创建 | 待更新 |
+| lateral_and_yaw | pending | 横移与转向 | 待创建 | 待更新 |
+| disturbance_and_contact | pending | 扰动与接触鲁棒性 | 待创建 | 待更新 |
+
+## 轮次索引
+| 轮次 | 状态 | 目标 | 结果文件 |
+|---|---|---|---|
+| Round 1 | pending | — | 待生成 |
+
+## 当前结论
+_（每轮实验后更新）_
+
+## 维护规则
+- 本文件只维护总览，不写大段实验细节。
+- 具体方案写到 deploy/sim2real/plans/
+- 每轮结果写到 deploy/sim2real/results/round_NN_{desc}.md
+- 每完成一轮: 更新当前轮次、状态、阶段总览、轮次索引、当前结论
+```
 
 ---
 
 ## Phase 1 — Sim2Real Gap Analysis
 
-Before writing any test code, analyse the design to predict where gaps are most likely.
+Before the first hardware session, write `deploy/sim2real-gap.md`. Focus on the gaps that are most likely to affect each stage of the test sequence.
 
-For each category below, assess: **simulated range vs real-world typical range**.
-Write findings to `deploy/sim2real-gap.md`:
+For each gap category, assess: **what was used in sim vs what the hardware actually has**.
 
 ```markdown
 # Sim2Real Gap Analysis
-_Design: {design-id} | Date: {date}_
+_Design: {design_id} | Date: {date}_
 
 ## Algorithm Profile
-- Policy type: {e.g. MLP, Transformer, CNN}
-- Obs space: {list key observations}
-- Action space: {joint torques / positions / velocities}
-- Control frequency: {Hz}
+- Policy type: {MLP / Transformer / CNN}
+- Obs space: {key channels from observation_contract}
+- Action space: {position targets / joint torques — note parallel joints}
+- Control frequency: {control_hz} Hz
+- History buffer: {num_hist} frames × {observations_size} dims
 
 ## Gap Assessment Table
-
 | Category | Sim Setting | Real-World Typical | Gap Risk | Priority |
 |----------|------------|-------------------|----------|----------|
-| **Latency** | {modelled delay: Xms} | {expected: Y–Zms} | High/Med/Low | 1 |
-| **Motor Kp/Kd** | {Kp=X, Kd=Y} | {hardware varies ±N%} | ... | ... |
-| **Sensor noise** | {IMU σ=X, enc σ=Y} | {real noise spectrum} | ... | ... |
-| **Actuator dynamics** | {first-order model / rigid} | {backlash, friction} | ... | ... |
-| **Gait / contact** | {contact model} | {real foot slip, bounce} | ... | ... |
-| **Mass / inertia** | {randomization range} | {real ± tolerance} | ... | ... |
-| **Terrain** | {flat / perturbed} | {deployment surface} | ... | ... |
+| Latency | {modelled delay} | {real inference + comms} | | 1 |
+| Motor Kp/Kd (standard joints) | {values from config} | {hardware varies ±N%} | | 2 |
+| Ankle Kp/Kd (torque-mode parallel) | {values} | {real response at load} | HIGH | 1 |
+| Sensor noise (IMU, encoders) | {noise std from DR} | {real noise PSD} | | |
+| LPF cutoff | {lpf_conf.wc} | {effective delay at real noise level} | | |
+| Action scale | {action_scale} | {real joint range utilization} | | |
+| Contact model | {sim foot contact} | {real floor, surface variability} | | |
 
-## Predicted Failure Modes
-1. {Most likely failure — e.g. "policy oscillates due to unmodelled latency"}
-2. {Second most likely — e.g. "gait breaks on hard floor due to friction mismatch"}
+## Predicted Failure Modes (per stage)
+1. sensor_and_sign_check: {e.g. joint sign error, topic mismatch}
+2. stand_transition: {e.g. ankle oscillation, hip overshoot}
+3. rl_idle: {e.g. ankle chatter from torque-mode mismatch}
+4. low_speed_walk: {e.g. toe scuffing from action_scale or Kd mismatch}
 
-## Test Priority Order
-Based on gap risk × likelihood: {ordered list of test categories}
+## Stage-Priority Order
+Based on gap risk: {list stages in order of highest gap risk}
 ```
 
 ---
 
-## Phase 2 — Test Plan
+## Phase 2 — Plan Next Hardware Session
 
-Select tests from the catalogue below based on Phase 1 priorities. Not all tests are mandatory — choose based on gap risk.
+Before EACH hardware session, create a plan file:
 
-Write `deploy/test-plan.md`:
+```
+deploy/sim2real/plans/{stage_name}_{optional_focus}.md
+```
+
+The plan must contain:
+1. **Session goal** — what stage(s) this session targets.
+2. **Pre-session checklist** — hardware, software, safety prerequisites.
+3. **Test procedure** — step-by-step, with specific parameter values and commands.
+4. **Watch items** — exactly what to observe (from `deploy_info.json` `sim2real_focus`).
+5. **Pass / fail criteria** — when to call this stage done vs escalate.
+6. **Stop conditions** — when to stop immediately (safety).
+7. **Data to record** — what logs/measurements to capture for post-analysis.
+
+**When to generate an identification plan**:
+
+If a previous round found an issue that needs quantitative characterization before changing parameters, create an identification plan rather than immediately changing values. Identification is especially required for:
+- Joint oscillation or chatter → identify Kp/Kd/bandwidth before tuning
+- Velocity tracking error → identify effective velocity feedback gain
+- Left/right asymmetry → identify per-joint offset or friction mismatch
+
+**Identification plan template** (`deploy/sim2real/plans/{joint}_{type}_identification.md`):
 
 ```markdown
-# Deployment Test Plan
-_Algorithm: {design-id} | Hardware: {robot model}_
+# {Joint Group} {Characterization Type} Identification Plan
 
-## Safety Prerequisites (always run first)
-- [ ] E-stop tested and responsive
-- [ ] Joint limit protection active
-- [ ] Fall detection active
-- [ ] Operator ready to intervene
+目标: 在修改参数前，得到等效闭环响应特性，判断应优先调哪个参数。
 
-## Test Sequence
+## 辨识原则
+- 一次只测一个关节，其余关节锁定在稳定姿态。
+- 先空载，再轻接地；先小幅阶跃，再扫频。
+- 先保持 kp 不变，用响应形态判断 kd 优先级。
 
-| # | Test | Purpose | Pass Criterion | Est. Duration |
-|---|------|---------|---------------|---------------|
-| 01 | Latency measurement | Quantify obs→action delay | p99 < {X}ms | 10 min |
-| 02 | Motor characterization | Measure actual Kp/Kd | Within ±{N}% of sim | 20 min |
-| 03 | Noise characterization | Measure real sensor noise | Noise model validity | 15 min |
-| 04 | Standing stability | Basic balance | Stable for {T}s | 10 min |
-| 05 | Gait cycle analysis | Foot contact timing, stride | Within {%} of sim | 30 min |
-| 06 | Speed range | Min/max stable speed | Matches requirements | 20 min |
-| 07 | Disturbance rejection | Push test | Recovers within {T}s | 15 min |
-| 08 | Terrain generalization | Different surfaces | {list criteria} | 30 min |
+## 测试前固定项
+| 项目 | 建议值 | 备注 |
+|---|---|---|
+| 机器人状态 | 吊保护或可靠支撑 | 避免跌倒 |
+| 其他关节 | 锁定在稳定站姿 | 减少耦合 |
+| 记录频率 | >= {control_hz} Hz | |
+| 每次改动 | 只改一个变量 | |
 
-## Stop Conditions
-Stop ALL testing immediately if:
-- Any joint exceeds {limit} for more than {T}ms
-- Robot falls and recovery is not automatic within {T}s
-- IMU reads angular velocity > {threshold}
+## 需要记录的数据
+| 字段 | 必需 | 用途 |
+|---|---|---|
+| 时间戳 t | 是 | 对齐分析 |
+| 关节名 | 是 | 区分 |
+| 目标位置 q_des | 是 | 输入参考 |
+| 实际位置 q | 是 | 跟踪误差 |
+| 实际速度 dq | 是 | 阻尼/振荡判断 |
+| 输出 effort/torque | 是 | 饱和判断 |
+| 当前 kp / kd | 是 | 记录配置 |
+| IMU 局部角速度 | 推荐 | 接触振动传播 |
+
+## 实验 1: 空载小阶跃
+| 项目 | 建议值 |
+|---|---|
+| 幅值 | 0.02 rad 起, 最多 0.05 rad |
+| 保持时间 | 1 ~ 2 s |
+| 重复次数 | 正反各 5 次 |
+| 中止条件 | 异响 / 持续振荡 / 输出异常增大 |
+
+## 实验 2: 空载扫频
+| 频率点 | 0.5, 1, 2, 3, 5, 7 Hz |
+| 幅值 | 0.01 ~ 0.02 rad |
+| 每点时长 | 8 ~ 10 s |
+
+## 实验 3: 轻接地小阶跃
+_如空载无问题，验证接触条件下是否更容易抖。_
+
+## 调参决策表
+| 辨识结果 | 优先动作 |
+|---|---|
+| 阶跃超调大，存在衰减振荡 | 先增加 kd |
+| 响应偏软、跟踪慢、无明显抖动 | 先增加 kp |
+| 空载正常，接地才抖 | 先小幅增加 kd，再看是否降低 lpf_conf.wc |
+| 高频小抖，扫频高频段放大 | 先增加 kd，必要时降低 lpf_conf.wc |
+| 左右差异明显 | 先排查装配/摩擦/零位，不先改统一参数 |
+| effort 经常接近饱和 | 不加 kp，先看命令幅值和接触工况 |
+
+## 辨识记录表
+| 轮次 | 关节 | 工况 | 输入类型 | 幅值 | kp | kd | 超调 | 稳定时间 | 是否抖动 | effort 异常 | 结论 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | | | | | | | | | | | |
+```
+
+---
+
+## Phase 3 — Execute Hardware Session
+
+This phase happens ON the hardware, with the operator running the plan.
+
+**Codex's role during session**:
+- If the user provides real-time observations (e.g., "ankle is chattering at ~5Hz"), use the `symptom_to_parameter_hints` from `deploy_info.json` to diagnose and suggest what to check.
+- Do NOT suggest parameter changes without first identifying the root cause.
+- If an unexpected failure occurs, ask the user to note: conditions, what happened, what the robot did, timestamp. This goes into the incident section of the results file.
+
+**Safety gates — stop ALL testing if**:
+- Any joint exceeds its configured limit for > {N} ms
+- Robot falls and cannot self-recover
+- Unusual audible noise or motor heating
 - Operator calls e-stop
-```
 
 ---
 
-## Phase 3 — Generate Test Code
+## Phase 4 — Record Session Results
 
-For each test in the plan, generate two scripts and place them in `deploy/tests/{NN}-{name}/`:
+After EACH hardware session, create:
 
-1. `measure.py` — data collection (runs on the robot or alongside it)
-2. `analyze.py` — offline analysis of collected data
-
-Generate scripts by reading the algorithm's obs/action space from `design-{id}.md` and `experiments/{exp-id}/config.json`. Do NOT write generic placeholders — fill in the actual joint names, topic names, control frequency, and obs dimensions.
-
-### Test Code Templates
-
----
-
-#### Test 01: Latency Measurement
-
-`measure.py` — instrument the policy inference loop:
-```python
-# deploy/tests/01-latency/measure.py
-"""Measure obs→action end-to-end latency.
-Run alongside policy node. Injects obs, timestamps action arrival."""
-import time, json, numpy as np
-
-CONTROL_HZ = {control_freq}   # from design
-N_SAMPLES   = 1000
-
-latencies = []
-for _ in range(N_SAMPLES):
-    obs = get_current_obs()       # implement per robot API
-    t0  = time.perf_counter()
-    act = policy.infer(obs)       # synchronous call
-    t1  = time.perf_counter()
-    latencies.append((t1 - t0) * 1000)  # ms
-    time.sleep(1.0 / CONTROL_HZ)
-
-results = {
-    "latencies_ms": latencies,
-    "p50": float(np.percentile(latencies, 50)),
-    "p95": float(np.percentile(latencies, 95)),
-    "p99": float(np.percentile(latencies, 99)),
-    "mean": float(np.mean(latencies)),
-    "std":  float(np.std(latencies)),
-}
-json.dump(results, open("results.json", "w"), indent=2)
-print(f"Latency p50/p95/p99: {results['p50']:.1f}/{results['p95']:.1f}/{results['p99']:.1f} ms")
+```
+deploy/sim2real/results/round_{NN}_{short_description}.md
 ```
 
-`analyze.py` — compare against sim modelled delay:
-```python
-# deploy/tests/01-latency/analyze.py
-import json, numpy as np, matplotlib.pyplot as plt
-
-r = json.load(open("results.json"))
-SIM_MODELLED_DELAY_MS = {sim_latency}  # from design
-
-gaps = {
-    "p99_gap_ms": r["p99"] - SIM_MODELLED_DELAY_MS,
-    "exceeds_sim_model": r["p99"] > SIM_MODELLED_DELAY_MS,
-}
-# Plot histogram, write report.md
-```
-
----
-
-#### Test 02: Motor Characterization (Kp/Kd Identification)
-
-`measure.py` — step response per joint:
-```python
-# deploy/tests/02-motor-char/measure.py
-"""Apply step position commands per joint, record actual trajectory.
-Fit first-order + PD model to identify effective Kp, Kd, friction."""
-import numpy as np, json
-
-JOINTS     = {joint_names}   # from design obs space
-STEP_DELTA = 0.05            # radians — small enough to be safe
-RECORD_HZ  = {control_freq}
-DURATION_S = 2.0
-
-results = {}
-for joint in JOINTS:
-    # Hold all other joints at current position
-    # Apply step command to this joint
-    # Record position, velocity, torque at RECORD_HZ
-    trajectory = record_step_response(joint, STEP_DELTA, DURATION_S)
-    kp_est, kd_est, friction_est = fit_pd_model(trajectory)
-    results[joint] = {
-        "kp_estimated": kp_est,
-        "kd_estimated": kd_est,
-        "friction_estimated": friction_est,
-        "kp_sim": {sim_kp},       # from design
-        "kd_sim": {sim_kd},
-        "kp_error_pct": abs(kp_est - {sim_kp}) / {sim_kp} * 100,
-    }
-
-json.dump(results, open("results.json", "w"), indent=2)
-```
-
-`analyze.py` — flag joints with >10% deviation, generate domain randomization recommendations.
-
----
-
-#### Test 03: Sensor Noise Characterization
-
-`measure.py` — record sensor streams while robot is stationary:
-```python
-# deploy/tests/03-noise/measure.py
-"""Record IMU, joint encoders at {control_freq}Hz for 60s while stationary.
-Compute noise PSD and compare against sim noise model."""
-SENSORS = {
-    "imu_accel": {"channels": 3, "sim_std": {imu_accel_noise}},
-    "imu_gyro":  {"channels": 3, "sim_std": {imu_gyro_noise}},
-    "joint_pos": {"channels": {n_joints}, "sim_std": {joint_pos_noise}},
-    "joint_vel": {"channels": {n_joints}, "sim_std": {joint_vel_noise}},
-}
-# Record 60s at control frequency, compute std per channel
-```
-
-`analyze.py` — compare real noise std vs sim noise std per sensor, flag under-modelled sensors.
-
----
-
-#### Test 04: Standing Stability
-
-`measure.py` — deploy policy in standing mode, record for 60s:
-```python
-# deploy/tests/04-stability/measure.py
-"""Run policy in standing mode. Record:
-- CoM height drift
-- Foot contact distribution
-- Joint torque RMS
-- Angular velocity (stability proxy)"""
-METRICS_HZ  = 100
-DURATION_S  = 60
-```
-
-`analyze.py` — compute stability score, compare joint torque RMS vs sim baseline.
-
----
-
-#### Test 05: Gait Cycle Analysis
-
-`measure.py` — record during forward walking at nominal speed:
-```python
-# deploy/tests/05-gait/measure.py
-"""Walk forward at {nominal_speed}m/s for 10 strides. Record:
-- Foot contact events (touch-down / lift-off timestamps)
-- Stride length, step height
-- Duty cycle per leg
-- CoM velocity (from base IMU + leg odometry)"""
-TARGET_SPEED   = {nominal_speed}   # m/s from requirements
-STRIDE_N       = 10
-```
-
-`analyze.py`:
-```python
-# Compare against sim gait statistics:
-SIM_STRIDE_LENGTH = {sim_stride}   # m
-SIM_DUTY_CYCLE    = {sim_duty}     # fraction
-SIM_STEP_HEIGHT   = {sim_step_h}   # m
-
-# Compute: actual vs sim per metric, flag deviations > 15%
-# Report: gait regularity score (variance across strides)
-```
-
----
-
-#### Test 06: Speed Range
-
-`measure.py` — sweep commanded speeds from min to max:
-```python
-# deploy/tests/06-speed/measure.py
-SPEED_RANGE = np.linspace({min_speed}, {max_speed}, num=8)  # from requirements
-# Per speed: walk 5m, measure actual speed, stability, energy
-```
-
----
-
-#### Test 07: Disturbance Rejection
-
-`measure.py` — record recovery from lateral push:
-```python
-# deploy/tests/07-disturbance/measure.py
-"""Operator applies lateral push at shoulder height (~10N).
-Record recovery trajectory: time to stable, max tilt angle."""
-# Each push trial: trigger recording → push → wait 3s → stop
-```
-
----
-
-#### Test 08: Terrain Generalization
-
-`measure.py` — walk on different surfaces (tile, carpet, grass, slight slope):
-```python
-# deploy/tests/08-terrain/measure.py
-TERRAINS = ["tile", "carpet", "grass", "slope_3deg", "slope_5deg"]
-# Per terrain: 5m walk, record slip events, gait quality, falls
-```
-
----
-
-## Phase 4 — Test Execution
-
-Execute tests in plan order. For each test:
-
-1. Brief the operator on the test procedure and stop conditions
-2. Confirm safety prerequisites (Phase 2 checklist) before each test
-3. Run `measure.py` — save raw data to `deploy/tests/{NN}-{name}/raw/`
-4. Run `analyze.py` — produce `deploy/tests/{NN}-{name}/results.json` and `report.md`
-5. Record pass/fail against plan criteria
-
-**Between tests**: Check for unexpected hardware wear (motor temperature, joint health).
-
-**If a test causes a fall or safety event**: Stop all testing. Document the failure in `deploy/tests/{NN}-{name}/incident.md` with: conditions, what happened, recovery. This is valuable data for design feedback.
-
----
-
-## Phase 5 — Results Analysis
-
-After all tests complete (or after stopping for safety), synthesise findings.
-
-Write `deploy/results-summary.md`:
+Format:
 
 ```markdown
-# Deployment Test Results
-_Algorithm: {design-id} | Date: {date} | Hardware: {robot}_
+# Round {NN} 实机实验结果
+_日期: {date} | 地点: {location} | 操作员: {operator}_
 
-## Test Outcomes
+轮次目标: {what this session was supposed to accomplish}
 
-| Test | Result | Key Metric | vs Sim | Gap | Action |
-|------|--------|-----------|--------|-----|--------|
-| 01 Latency | ✓ PASS | p99={X}ms | sim={Y}ms | +{Z}ms | None |
-| 02 Motor Kp/Kd | ✗ FAIL | max err=18% | target<10% | 8pp | Expand DR |
-| 03 Noise | ✓ PASS | all sensors within 1.5× sim | — | — | None |
-| 04 Stability | ✓ PASS | stable 60s | sim stable | — | None |
-| 05 Gait | △ WARN | duty cycle {X}% vs sim {Y}% | -{Z}% | 12% | Monitor |
-| 06 Speed range | ✓ PASS | {min}–{max} m/s | matches | — | None |
-| 07 Disturbance | ✗ FAIL | recovery={X}s | sim={Y}s | +{Z}s | Retrain |
-| 08 Terrain | △ WARN | slip on grass | no sim DR | — | Add terrain DR |
+## 阶段结果
 
-## Overall Sim2Real Gap Score
-{computed as: (passed tests) / (total tests) × weight by priority}
+| 阶段 | 结果 | 结论 | 后续动作 |
+|---|---|---|---|
+| {stage_name} | {通过 / 部分通过 / 未通过 — specific observation} | {root cause if failed} | {next action} |
 
-## Critical Failures
-{List any falls, safety events, or hard FAILs with root-cause hypothesis}
+## 参数变更记录
+
+| 参数 | 变更前 | 变更后 | 理由 | 效果 |
+|---|---|---|---|---|
+| {param_name} | {old_value} | {new_value} | {why} | {observed effect} |
+
+## 本轮结论
+- {bullet 1: what was confirmed}
+- {bullet 2: what was found}
+- {what is currently NOT recommended to change}
+- {what the next priority action is}
+
+## 安全事件 (如有)
+_（描述: 条件、发生了什么、恢复情况）_
+```
+
+---
+
+## Phase 5 — Update Checklist and Draw Conclusions
+
+After writing the results file, update `deploy/sim2real_checklist.md`:
+
+1. Increment the round number.
+2. Update the stage status in the 阶段总览 table.
+3. Add a new row to the 轮次索引 table.
+4. Replace the 当前结论 section with new conclusions.
+5. If a new plan is needed, create it and add it to the 阶段总览 table.
+
+**Decision logic**:
+
+```
+Did the current stage PASS?
+  YES → Advance to next stage. Create a plan for it. Update checklist.
+  NO  →
+    Is the failure due to a quantifiable parameter issue?
+      YES → Create an identification plan → GOTO Phase 2
+      NO (setup/hardware issue) → Fix it, re-run same stage
+    Was there a safety incident?
+      YES → Stop. Document. Do not continue until root cause is resolved.
+
+Have ALL stages in the 阶段总览 passed?
+  YES → GOTO Phase 6 (Design Feedback)
+  NO  → GOTO Phase 2 (Plan next session)
 ```
 
 ---
 
 ## Phase 6 — Design Feedback
 
-This is the most important output of `$deploy`. Convert every test result into a concrete, testable hypothesis for the next `$design` iteration.
+After all mandatory stages pass (or after deciding to stop due to persistent failure), write `deploy/design-feedback.md`.
 
-Write `deploy/design-feedback.md`:
+Convert every round's parameter changes and failures into concrete hypotheses for the next `$design` iteration:
 
 ```markdown
 # Design Feedback for Next Iteration
-_Source: deployment test {date} | Algorithm: {design-id}_
+_Source: deploy rounds 1–{N} | Algorithm: {design_id} | Date: {date}_
 
-## Critical (must fix before re-deployment)
+## Critical (must fix before next deployment attempt)
 
-### FB-01: Latency margin too thin
-- **Evidence**: p99 latency = {X}ms, sim modelled only {Y}ms
-- **Root cause hypothesis**: Policy inference is {Z}ms; remaining {W}ms is communication overhead not modelled in sim
+### FB-01: {Title}
+- **Evidence**: {specific observation + round number}
+- **Root cause hypothesis**: {mechanical, sim DR, reward, obs design, etc.}
 - **Recommended $design change**:
-  - Option A: Reduce policy network size (distil to smaller MLP)
-  - Option B: Increase simulated latency in DR range to [{Y}–{X+5}]ms
-  - Option C: Move policy to onboard GPU (hardware change)
-- **Expected gain**: Closing this gap should recover {est. metric improvement}
+  - Option A: {change}
+  - Option B: {alternative}
+- **Expected gain**: {what would improve}
+- **Priority**: HIGH / MEDIUM / LOW
 
-### FB-02: Motor Kp/Kd mismatch causing oscillation
-- **Evidence**: joint {name} Kp measured at {X}, sim assumed {Y} (error {Z}%)
-- **Root cause hypothesis**: Sim used fixed Kp/Kd; real motors have temperature-dependent gain
-- **Recommended $design change**:
-  - Widen Kp DR range from [{a,b}] to [{c,d}] (cover measured range + 20% margin)
-  - Add Kd randomization (currently fixed in sim)
-  - Consider adding Kp/Kd as part of the privileged critic input
-- **Priority**: HIGH (oscillation is a stability risk)
+## Parameter Adaptations Made (not design changes — record for next deploy baseline)
 
-## Important (fix in next 1–2 iterations)
-
-### FB-03: Disturbance recovery slower than sim
-- **Evidence**: push recovery {X}s real vs {Y}s sim
-- **Root cause hypothesis**: Sim contact model too forgiving; real floor has higher friction causing different recovery dynamics
-- **Recommended $design change**:
-  - Add friction randomization: μ ~ Uniform({a}, {b}) (currently {c})
-  - Add push perturbation in training: F_push ~ Uniform(5N, 15N) at random body sites
-- **Priority**: MEDIUM
-
-## Observations (inform but not blocking)
-
-### FB-04: Gait duty cycle shifted on carpet
-- **Evidence**: duty cycle {real}% vs sim {sim}% — within acceptable range but trending
-- **Root cause hypothesis**: Carpet friction damps foot bounce; sim contact bounces more
-- **Recommended $design change**:
-  - No immediate change needed. Monitor across 2 more deployments.
-  - If trend continues: add terrain texture DR
-
-## Summary Priority Queue for $design
-
-| Priority | Feedback | Design Change Type | Estimated Impact |
-|----------|---------|-------------------|-----------------|
-| 1 | FB-02: Motor Kp/Kd | Widen DR range | High — stability |
-| 2 | FB-03: Disturbance | Add push perturbation | Medium — robustness |
-| 3 | FB-01: Latency | Network distillation | Medium — reliability |
-| 4 | FB-04: Gait drift | Terrain DR | Low — future-proofing |
+| Parameter | Sim value | Deployed value | Adaptation reason |
+|---|---|---|---|
+| {e.g. ankle_kd} | {sim} | {real} | {why it needed changing} |
 ```
 
 ---
 
 ## Phase 7 — Deployment Decision
 
-Based on the results summary, make one of three decisions:
+Based on stage completions and outstanding issues:
 
-**DEPLOY**: All critical tests pass. Acceptable gaps documented. Package and deploy.
-- Package the policy: serialize model, write `deploy/serve.py`, pin `deploy/requirements.txt`
-- Write minimal deployment config: control frequency, obs/action space, safety thresholds
-- Complete `deploy/deploy-checklist.md`
+**DEPLOY**: All mandatory stages passed. Acceptable gaps documented. Parameter adaptations recorded.
+- Lock the adapted parameter set in `deploy/deploy_info.json` (update `rl_walk_params`).
+- Write final `deploy/sim2real_checklist.md` with all stages `✓ completed`.
 
-**HOLD — fix hardware/config**: Tests failed due to hardware configuration (wrong Kp/Kd loaded, firmware issue). Fix config, re-run affected tests only. No `$design` change needed.
+**HOLD — fix hardware/config**: Failure was due to setup issue (wrong topic, firmware, calibration). Fix and re-run affected stage only.
 
-**RETURN TO $design**: Critical sim2real gaps found that cannot be fixed by config change.
-- Write the decision in `deploy/deploy-checklist.md` with reason
-- Hand `deploy/design-feedback.md` to the next `$design` session
+**RETURN TO $design**: Sim2real gap is fundamental — cannot be closed by parameter adaptation alone.
+- Write the decision in `deploy/sim2real_checklist.md`.
+- Hand `deploy/design-feedback.md` to the next `$design` session.
 - Announce: "Returning to $design with {N} critical findings. See deploy/design-feedback.md."
-
----
-
-## deploy/deploy-checklist.md
-
-```markdown
-# Deployment Checklist
-_Algorithm: {design-id} | Date: {date} | Hardware: {robot}_
-
-## Safety
-- [ ] E-stop tested before all sessions
-- [ ] No joint limit violations during any test
-- [ ] No uncontrolled falls during tests (or all incidents documented)
-
-## Tests Completed
-- [ ] 01 Latency: {result}
-- [ ] 02 Motor Kp/Kd: {result}
-- [ ] 03 Noise: {result}
-- [ ] 04 Stability: {result}
-- [ ] 05 Gait cycle: {result}
-- [ ] 06 Speed range: {result}
-- [ ] 07 Disturbance: {result}
-- [ ] 08 Terrain: {result}
-
-## Outputs
-- [ ] deploy/sim2real-gap.md written
-- [ ] deploy/results-summary.md written
-- [ ] deploy/design-feedback.md written (mandatory regardless of outcome)
-
-## Decision
-- [ ] **DEPLOY** — all critical tests passed, model packaged at `deploy/model.{ext}`
-- [ ] **HOLD** — config/hardware fix required, re-test scheduled
-- [ ] **RETURN TO $design** — critical sim2real gaps, feedback written
-
-## Known Limitations in Deployment
-{list any remaining gaps that are accepted as known limitations}
-```
 
 ---
 
@@ -499,12 +507,36 @@ _Algorithm: {design-id} | Date: {date} | Hardware: {robot}_
 
 ```
 Deploy complete.
-  Algorithm:  {design-id}
-  Hardware:   {robot}
-  Tests:      {N passed} / {total} — {N critical failures}
-  Decision:   {DEPLOY / HOLD / RETURN TO $design}
-  Sim2Real gap score: {X}/{total} tests passed
-  Design feedback: {N} recommendations written to deploy/design-feedback.md
-  {If DEPLOY: Model packaged at deploy/model.{ext}}
-  {If RETURN: Next $design priority: {top FB item}}
+  Algorithm:    {design_id}
+  Hardware:     {robot_name}
+  Rounds run:   {N}
+  Stages:       {N passed} / {total} — {N pending}
+  Decision:     {DEPLOY / HOLD / RETURN TO $design}
+  Adapted params: {list key changes from sim baseline}
+  Design feedback: {N} recommendations → deploy/design-feedback.md
+  {If DEPLOY: Final params locked in deploy/deploy_info.json}
+  {If RETURN: Top priority for $design: {FB-01 title}}
+```
+
+---
+
+## File Map
+
+```
+deploy/
+├── deploy_info.json          ← Phase 0.5: deployment contract (generated from source)
+├── sim2real_checklist.md     ← Phase 0.6: living state doc (updated every round)
+├── sim2real-gap.md           ← Phase 1: gap analysis
+├── design-feedback.md        ← Phase 6: feedback for next $design
+├── sim2real/
+│   ├── plans/
+│   │   ├── round_01_sensor_and_sign.md
+│   │   ├── ankle_kp_kd_identification.md
+│   │   └── ...
+│   └── results/
+│       ├── round_01_field_test.md
+│       ├── round_02_ankle_identification.md
+│       └── ...
+└── tests/                    ← Optional: automated measure/analyze scripts (see templates)
+    └── ...
 ```

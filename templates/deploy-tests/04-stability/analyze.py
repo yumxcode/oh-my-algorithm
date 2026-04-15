@@ -33,22 +33,25 @@ def main(results_path: str, out_path: str):
     n_falls    = sum(1 for t in trials if t["fell"])
     n_survived = n_trials - n_falls
 
+    # recovery_times is parallel to trials: None for falls, float for survivors
     recovery_times = []
     for trial in trials:
         if trial["fell"]:
+            recovery_times.append(None)
             continue
         traj = trial["trajectory"]
-        if not traj:
-            continue
-        # Recovery = first time tilt < 5 deg and stays there
-        for i, pt in enumerate(traj):
+        rec_t = None
+        for pt in traj:
             tilt = max(abs(pt.get("roll_deg", 0)), abs(pt.get("pitch_deg", 0)))
             if tilt < 5.0:
-                recovery_times.append(pt["t"])
+                rec_t = pt["t"]
                 break
+        recovery_times.append(rec_t)
 
-    rec_mean = float(np.mean(recovery_times)) if recovery_times else None
-    rec_max  = float(np.max(recovery_times))  if recovery_times else None
+    valid_rec = [t for t in recovery_times if t is not None]
+
+    rec_mean = float(np.mean(valid_rec)) if valid_rec else None
+    rec_max  = float(np.max(valid_rec))  if valid_rec else None
 
     feedback = []
 
@@ -93,7 +96,7 @@ def main(results_path: str, out_path: str):
         "",
     ]
 
-    if recovery_times:
+    if valid_rec:
         lines += [
             f"| Recovery time mean | {rec_mean:.3f}s |",
             f"| Recovery time max  | {rec_max:.3f}s  |",
@@ -135,8 +138,8 @@ def main(results_path: str, out_path: str):
             (max(abs(pt.get("roll_deg", 0)), abs(pt.get("pitch_deg", 0))) for pt in traj),
             default=0.0
         )
-        rec = recovery_times[i] if i < len(recovery_times) else "—"
-        rec_str = f"{rec:.3f}" if isinstance(rec, float) else rec
+        rec = recovery_times[i] if i < len(recovery_times) else None
+        rec_str = f"{rec:.3f}" if isinstance(rec, float) else "—"
         lines.append(
             f"| {i+1} | {trial['direction']} | {'✗ FALL' if trial['fell'] else '✓'} | "
             f"{max_t:.2f} | {rec_str} |"

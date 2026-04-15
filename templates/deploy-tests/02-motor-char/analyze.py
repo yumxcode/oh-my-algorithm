@@ -161,13 +161,15 @@ def main(results_path: str, out_path: str):
     ]
 
     for row in rows:
-        rmse_s   = f"{row['rmse']:.4f}" if row["rmse"] else "N/A"
+        rmse_s   = f"{row['rmse']:.4f}" if row["rmse"] is not None else "N/A"
         settle_s = f"{row['settle_s']:.3f}"
+        kp_est_s = f"{row['kp_est']:.1f}" if row["kp_est"] is not None else "N/A"
+        kd_est_s = f"{row['kd_est']:.1f}" if row["kd_est"] is not None else "N/A"
+        kp_sim_s = str(row["kp_sim"]) if row["kp_sim"] is not None else "—"
+        kd_sim_s = str(row["kd_sim"]) if row["kd_sim"] is not None else "—"
         lines.append(
-            f"| {row['joint']} | {row['kp_est'] or 'N/A':.1f} | "
-            f"{row['kp_sim'] or '—'} | {row['kp_diff']} | "
-            f"{row['kd_est'] or 'N/A':.1f} | "
-            f"{row['kd_sim'] or '—'} | {row['kd_diff']} | "
+            f"| {row['joint']} | {kp_est_s} | {kp_sim_s} | {row['kp_diff']} | "
+            f"{kd_est_s} | {kd_sim_s} | {row['kd_diff']} | "
             f"{settle_s} | {rmse_s} |"
         )
 
