@@ -2,7 +2,7 @@
 
 const fs   = require('fs');
 const path = require('path');
-const { OMA, templatePath, exists } = require('../utils/paths');
+const { OMA, pkgRoot, templatePath, exists } = require('../utils/paths');
 const { header, section, ok, warn, info, blank, log, color } = require('../utils/print');
 
 const DIRS_TO_CREATE = [
@@ -83,13 +83,54 @@ async function setup({ cwd = process.cwd(), force = false } = {}) {
     warn('.oma/config.json', 'already exists, skipped');
   }
 
-  // ── 4. Write .gitignore entry ────────────────────────────────────────────
+  // ── 4. Copy AGENTS.md into project root ─────────────────────────────────
+  section('Installing Codex agent prompt (AGENTS.md)');
+
+  const agentsSrc  = path.join(pkgRoot(), 'AGENTS.md');
+  const agentsDest = path.join(cwd, 'AGENTS.md');
+
+  if (exists(agentsDest) && !force) {
+    warn('AGENTS.md', 'already exists, skipped  (use --force to overwrite)');
+  } else if (!exists(agentsSrc)) {
+    warn('AGENTS.md', 'source not found in package — skipped');
+  } else {
+    fs.copyFileSync(agentsSrc, agentsDest);
+    ok('AGENTS.md', 'copied from package');
+  }
+
+  // ── 5. Copy skills/ directory into .oma/skills/ ─────────────────────────
+  section('Installing .oma/skills/ (Codex stage prompts)');
+
+  const skillsSrc  = path.join(pkgRoot(), 'skills');
+  const skillsDest = path.join(OMA.dir(cwd), 'skills');
+
+  if (!exists(skillsSrc)) {
+    warn('.oma/skills/', 'source not found in package — skipped');
+  } else {
+    copyDirRecursive(skillsSrc, skillsDest, force);
+    ok('.oma/skills/', `installed at ${path.relative(cwd, skillsDest)}`);
+  }
+
+  // ── 6. Copy templates/ directory into .oma/templates/ ───────────────────
+  section('Installing .oma/templates/ (deploy test scripts + config templates)');
+
+  const templatesSrc  = path.join(pkgRoot(), 'templates');
+  const templatesDest = path.join(OMA.dir(cwd), 'templates');
+
+  if (!exists(templatesSrc)) {
+    warn('.oma/templates/', 'source not found in package — skipped');
+  } else {
+    copyDirRecursive(templatesSrc, templatesDest, force);
+    ok('.oma/templates/', `installed at ${path.relative(cwd, templatesDest)}`);
+  }
+
+  // ── 7. Write .gitignore entry ────────────────────────────────────────────
   const gitignorePath = path.join(cwd, '.gitignore');
-  const omaIgnoreEntry = '\n# oh-my-algorithm state\n.oma/experiments/\n.oma/leaderboard.json\n.oma/best.json\n.oma/trajectory.jsonl\n';
+  const omaIgnoreEntry = '\n# oh-my-algorithm state\n.oma/experiments/\n.oma/leaderboard.json\n.oma/best.json\n.oma/trajectory.jsonl\n# oh-my-algorithm tooling (managed by oma setup, not project files)\n.oma/skills/\n.oma/templates/\n';
 
   if (exists(gitignorePath)) {
     const existing = fs.readFileSync(gitignorePath, 'utf8');
-    if (!existing.includes('.oma/experiments/')) {
+    if (!existing.includes('.oma/skills/')) {
       fs.appendFileSync(gitignorePath, omaIgnoreEntry);
       ok('.gitignore', 'appended .oma experiment entries');
     } else {
@@ -100,7 +141,7 @@ async function setup({ cwd = process.cwd(), force = false } = {}) {
     ok('.gitignore', 'created with .oma experiment entries');
   }
 
-  // ── 5. Next steps ─────────────────────────────────────────────────────────
+  // ── 7. Next steps ─────────────────────────────────────────────────────────
   blank();
   log(color.bold('  Setup complete. What to do next:'));
   blank();
@@ -108,6 +149,29 @@ async function setup({ cwd = process.cwd(), force = false } = {}) {
   info('Start your first session in Codex with:',       '"clarify the problem" or "$requirement"');
   info('Check status anytime with:',                    'oma status');
   blank();
+}
+
+// Files and directories to skip when copying skills/ or templates/
+const COPY_SKIP = new Set(['.DS_Store', 'Thumbs.db', '.gitkeep']);
+function shouldSkip(name) {
+  return COPY_SKIP.has(name) || name === '__pycache__' || name.endsWith('.pyc');
+}
+
+// Copy a directory recursively. If force=false, skips files that already exist.
+function copyDirRecursive(src, dest, force) {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    if (shouldSkip(entry.name)) continue;
+    const srcPath  = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      copyDirRecursive(srcPath, destPath, force);
+    } else {
+      if (!exists(destPath) || force) {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
+  }
 }
 
 // Minimal stub content when templates dir is not available

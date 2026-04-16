@@ -64,7 +64,7 @@ Before generating any artifact, read the actual source files that define the dep
 
 Generate `deploy/deploy_info.json` from the source files read in Phase 0. This is the single source of truth for the entire deploy stage. All subsequent phases reference this file.
 
-**Template** (`templates/deploy_info_template.json` if it exists, otherwise build from scratch):
+**Template** (`.oma/templates/deploy_info_template.json` if it exists, otherwise build from scratch):
 
 ```json
 {

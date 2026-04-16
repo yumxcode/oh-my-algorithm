@@ -9,7 +9,7 @@ USE PARALLEL SUBAGENTS FOR INDEPENDENT EXPERIMENTS (tune sweeps, ablation runs) 
 
 You are running with oh-my-algorithm (OMA), a workflow orchestration layer for **robot algorithm development** on Codex CLI.
 This AGENTS.md is the top-level operating contract for the workspace.
-Skill prompts under `skills/*/SKILL.md` are narrower execution surfaces and must follow this file, not override it.
+Skill prompts under `.oma/skills/*/SKILL.md` are narrower execution surfaces and must follow this file, not override it.
 
 **Primary domain**: legged locomotion, manipulation, and mobile robotics. Core challenge: the sim-to-real gap — policies trained in simulation must transfer to real hardware with different dynamics, noise, latency, and actuator response.
 
@@ -160,15 +160,15 @@ When the user message contains a mapped keyword, activate the corresponding skil
 
 | Keyword(s) | Skill | Action |
 |------------|-------|--------|
-| "requirement", "clarify", "define problem", "what are we solving" | `$requirement` | Read `skills/requirement/SKILL.md`, execute |
-| "design", "algorithm design", "architecture", "which model", "policy design", "reward design", "network design" | `$design` | Read `skills/design/SKILL.md`, produce design document |
-| "implement", "code it", "build the pipeline", "write the trainer" | `$implement` | Read `skills/implement/SKILL.md`, build implementation |
+| "requirement", "clarify", "define problem", "what are we solving" | `$requirement` | Read `.oma/skills/requirement/SKILL.md`, execute |
+| "design", "algorithm design", "architecture", "which model", "policy design", "reward design", "network design" | `$design` | Read `.oma/skills/design/SKILL.md`, produce design document |
+| "implement", "code it", "build the pipeline", "write the trainer" | `$implement` | Read `.oma/skills/implement/SKILL.md`, build implementation |
 | "index codebase", "scan repo", "reference implementation", "open source" | `oma index` | Run `oma index --src <path>` |
-| "train", "run training", "fit the model", "start training", "launch experiment" | `$train` | Read `skills/train/SKILL.md`, execute training run |
-| "tune", "hyperparameter", "sweep", "ablation", "search configs" | `$tune` | Read `skills/tune/SKILL.md`, run sweep + final evaluation |
-| "evaluate", "test set", "final eval", "how good is it" | `$tune` | Read `skills/tune/SKILL.md` Phase 5 |
-| "deploy", "sim2real", "hardware test", "real robot", "productionize" | `$deploy` | Read `skills/deploy/SKILL.md`, build deployment artifacts |
-| "consolidate", "update memory", "record findings", "what did we learn" | `$consolidate` | Read `skills/consolidate/SKILL.md`, update memory.md |
+| "train", "run training", "fit the model", "start training", "launch experiment" | `$train` | Read `.oma/skills/train/SKILL.md`, execute training run |
+| "tune", "hyperparameter", "sweep", "ablation", "search configs" | `$tune` | Read `.oma/skills/tune/SKILL.md`, run sweep + final evaluation |
+| "evaluate", "test set", "final eval", "how good is it" | `$tune` | Read `.oma/skills/tune/SKILL.md` Phase 5 |
+| "deploy", "sim2real", "hardware test", "real robot", "productionize" | `$deploy` | Read `.oma/skills/deploy/SKILL.md`, build deployment artifacts |
+| "consolidate", "update memory", "record findings", "what did we learn" | `$consolidate` | Read `.oma/skills/consolidate/SKILL.md`, update memory.md |
 | "go <stage>", "skip to", "jump to", "just do", "standalone" | Standalone | Write `.oma/standalone.json`, enter named stage directly |
 
 **Robot-specific keyword detection**:
