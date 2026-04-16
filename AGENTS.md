@@ -22,10 +22,23 @@ Skill prompts under `.oma/skills/*/SKILL.md` are narrower execution surfaces and
 1. Check if `.oma/standalone.json` exists → if yes, enter **Standalone Mode** (see below). Gates become advisory.
 2. Read `.oma/memory.md` if it exists → internalize Dead Ends, Working Patterns, Open Hypotheses.
 3. Check the gate condition for the requested skill. In normal mode, a blocked gate requires you to stop and report. In standalone mode, a blocked gate produces a warning only.
+4. **Check for in-progress work** from previous sessions (cross-session recovery):
+   - `.oma/design-draft.md` exists → a `$design` idea generation session was interrupted; resume from Phase 2 or 3 instead of regenerating ideas.
+   - `.oma/tune-current.json` exists → a `$tune` session is in progress; check its `phase` field and resume accordingly (orphaned tasks, consolidate, etc.).
+   - For `$train` / `$tune`: scan `trajectory.jsonl` for any `"event":"started"` without a matching `"completed"` or `"failed"` — these are potentially still-running Gradmotion tasks that need status checking via `gm task info`.
 
-Skipping this protocol wastes compute on already-proven dead ends. This is the highest-cost mistake in robot algorithm development.
+Skipping this protocol wastes compute on already-proven dead ends and loses in-progress hardware test / training context. This is the highest-cost mistake in robot algorithm development.
 
-4. (Optional) A global experience library may exist at `~/.oma/experiences.jsonl` — accumulated successful practices from past projects. The `$design`, `$tune`, and `$deploy` skills will each remind you of this. You decide if and when to query it via `oma xp search "<topic>"`.
+5. (Optional) A global experience library exists at `~/.oma/`. Two-file design:
+   - `~/.oma/xp-index.json` — **lightweight index** (id, stage, title, tags only). Read this first to decide relevance without loading heavy content.
+   - `~/.oma/experiences.jsonl` — full experience content. Read only when the index reveals relevant entries.
+
+   **Recommended lookup pattern** (used in `$design`, `$tune`, `$deploy`):
+   ```
+   oma xp index --format md              # step 1: scan index (~1KB per 50 entries)
+   oma xp show <id>                      # step 2: fetch full detail only if relevant
+   oma xp search "<topic>" --stage <s>   # alternative: keyword search across full content
+   ```
 
 ---
 

@@ -5,7 +5,13 @@
 **Gate in**: `.oma/knowledge.md` must exist and contain `Status: LOCKED`.
 **Standalone entry**: Allowed via `oma go design`. If knowledge.md is missing, ask the user for: task description, sim environment, hardware target, primary metric.
 **Gate out**: Creates `.oma/designs/design-{id}.md`. Gate to `$implement` opens only after this file exists.
-**Experience library**: A global experience library may exist at `~/.oma/experiences.jsonl` with successful design practices from past projects (reward structures, DR ranges, architecture choices, etc.). If querying it would help a decision, run: `oma xp search "<topic>" --stage design`. This is optional — use your judgment.
+**Experience library**: Two-file global library at `~/.oma/`. Lookup pattern:
+```
+oma xp index --stage design --format md   # scan index first (lightweight)
+oma xp show <id>                          # fetch full detail only if relevant
+oma xp search "<topic>" --stage design    # keyword search when topic is specific
+```
+Use the index at Phase 0 to quickly check if past reward structures, DR ranges, or architecture choices are relevant. This is optional — use your judgment.
 
 ---
 
@@ -30,6 +36,21 @@ Phase 3  Human co-creation  (idea cards → select / modify / hint)
     ↓
 Phase 4  Design commitment  (elaborate selected idea → design-{id}.md)
 ```
+
+---
+
+## Session Resumption Check (run FIRST)
+
+Before regenerating anything, check for a saved idea pool from a previous design session:
+
+- If `.oma/design-draft.md` exists → read it. It contains all three stream idea pools already generated. **Skip Phase 1 entirely**, proceed to Phase 2 (evaluation) or Phase 3 (human co-creation) based on what's already in the file.
+  - If the draft ends mid-stream (e.g. only Stream A and B) → resume from the missing stream.
+  - If all three streams are complete but no human selection yet → go directly to Phase 3 (present idea cards).
+  - If human selected ideas but `design-{id}.md` is absent → go directly to Phase 4 (design commitment).
+
+Announce which phase you're resuming from.
+
+If `.oma/design-draft.md` does not exist → start fresh from Phase 0.
 
 ---
 
@@ -221,6 +242,27 @@ Produce 3–5 Stream C ideas. **At least 2 must come from domains not mentioned 
 ---
 
 ## Phase 2 — Idea Evaluation
+
+**Before starting evaluation, save all three streams to `.oma/design-draft.md`:**
+
+```markdown
+# Design Draft — {project name}
+_Saved: {ISO timestamp}_
+_Status: streams-complete — awaiting evaluation and human selection_
+
+## Stream A Ideas
+{full Stream A output}
+
+## Stream B Ideas
+{full Stream B output}
+
+## Stream C Ideas
+{full Stream C output}
+```
+
+This file enables cross-session recovery. If the session ends now, the next session can skip Phase 1 entirely.
+
+---
 
 Now that all three streams are complete, evaluate the full idea pool.
 
@@ -443,6 +485,8 @@ Design committed: {design-id}
 
 Gate to $implement is now open.
 ```
+
+**After writing `design-{id}.md`**: delete `.oma/design-draft.md` (the draft is superseded by the committed design).
 
 ---
 

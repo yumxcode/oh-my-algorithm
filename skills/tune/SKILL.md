@@ -11,7 +11,54 @@ This skill subsumes the former `$evaluate` skill. Final test-set evaluation is t
 **Gate in**: At least one `experiments/{exp-id}/results.json` with `phase: train` exists.
 **Standalone entry**: Allowed via `oma go tune`. If no prior train results exist, ask user: "Do you have existing experiment results to sweep from? If yes, provide exp-id and metric. If no, we'll run a first baseline first."
 **Gate out**: `.oma/best.json` written with `deployGateOpen` field set. Appends to `trajectory.jsonl`. **Automatically triggers `$consolidate`.**
-**Experience library**: A global experience library may exist at `~/.oma/experiences.jsonl` with successful tuning practices from past projects (effective hyperparameter ranges, convergence tricks, ablation findings, etc.). If querying it would help, run: `oma xp search "<topic>" --stage tune`. This is optional — use your judgment.
+**Experience library**: Two-file global library at `~/.oma/`. Lookup pattern:
+```
+oma xp index --stage tune --format md    # scan index first (lightweight)
+oma xp show <id>                         # fetch full detail only if relevant
+oma xp search "<topic>" --stage tune     # keyword search when topic is specific
+```
+Check the index at Phase 0 for effective hyperparameter ranges or convergence tricks from past projects. This is optional — use your judgment.
+
+---
+
+## Session Resumption Check (run FIRST, before anything else)
+
+**Before any new action, check for in-progress work from a previous session:**
+
+### Step R1 — Check for active tune session
+
+If `.oma/tune-current.json` exists, read it:
+
+```json
+{
+  "tuneId": "tune-20250120-01",
+  "phase": "sweep",
+  "planFile": ".oma/tune-20250120-01-plan.json",
+  "activeExpIds": ["exp-20250120-003", "exp-20250120-004"]
+}
+```
+
+This is the active tune session pointer written at Phase 1 startup and deleted only when `$consolidate` completes.
+
+If it exists → resume that session:
+- If `phase: "sweep"` → check each `activeExpIds` task via `gm task info`
+- If `phase: "final_eval"` → check the eval task, collect results
+- If `phase: "consolidate"` → trigger `$consolidate` directly
+
+### Step R2 — Check for orphaned Gradmotion tasks
+
+Scan `.oma/trajectory.jsonl` for any `"event":"started"` without a matching `"completed"` or `"failed"` for the same `expId`. For each:
+
+```bash
+gm task info --task-id "{taskId}"
+```
+
+- **Running / Queued**: attach to logs (`gm task logs --follow --raw`), resume Phase 3 collect.
+- **Completed**: collect results, update `leaderboard.json`, write `results.json`, update trajectory.
+- **Failed**: write failed `results.json`, update trajectory, note in tune analysis.
+- **Not found**: log `"event":"lost"` in trajectory.
+
+If no orphaned tasks and no `tune-current.json` → start fresh, proceed to Phase 0.
 
 ---
 
@@ -67,6 +114,20 @@ Write `.oma/tune-{YYYYMMDD}-{seq}-plan.json` before launching anything:
   "estimatedGpuHours": 4.5,
   "remainingBudgetGpuHours": 18.0
 }
+```
+
+**Immediately after writing the plan, write `.oma/tune-current.json`** (session pointer for cross-session recovery):
+
+```json
+{
+  "tuneId": "tune-{YYYYMMDD}-{seq}",
+  "phase": "sweep",
+  "planFile": ".oma/tune-{YYYYMMDD}-{seq}-plan.json",
+  "activeExpIds": []
+}
+```
+
+Update `activeExpIds` as each task is launched. This file is deleted only after `$consolidate` completes successfully.
 ```
 
 ---
@@ -216,8 +277,15 @@ Append to `trajectory.jsonl`:
 {"ts":"{ISO}","phase":"tune","tuneId":"{tuneId}","event":"eval_complete","expId":"{id}","testMetric":{mean},"deployGateOpen":true}
 ```
 
+**Update `tune-current.json` phase before triggering consolidate:**
+```json
+{ "tuneId": "...", "phase": "consolidate", ... }
+```
+
 **Immediately trigger `$consolidate`.** Pass tune analysis + error analysis as context.
 Do not skip. This is mandatory regardless of whether results improved.
+
+**After `$consolidate` completes**: delete `.oma/tune-current.json` (this tune session is fully closed).
 
 ---
 

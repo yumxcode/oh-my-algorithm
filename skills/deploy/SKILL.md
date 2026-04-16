@@ -5,7 +5,13 @@
 **Gate in**: `.oma/best.json` with `deployGateOpen: true`.
 **Standalone entry**: Allowed via `oma go deploy`. If `best.json` is missing, ask: "Which checkpoint are you deploying? Provide: (1) policy file path, (2) robot model, (3) control_hz, (4) did it pass sim evaluation?" Then proceed with a `⚠️ STANDALONE` notice.
 **Gate out**: `deploy/sim2real_checklist.md` with all mandatory stages `✓ completed`.
-**Experience library**: A global library may exist at `~/.oma/experiences.jsonl`. Query with: `oma xp search "<topic>" --stage deploy`.
+**Experience library**: Two-file global library at `~/.oma/`. Lookup pattern:
+```
+oma xp index --stage deploy --format md   # scan index first (lightweight)
+oma xp show <id>                          # fetch full detail only if relevant
+oma xp search "<topic>" --stage deploy    # keyword search by symptom or parameter name
+```
+Check the index at Phase 0 for past sim2real experiences (ankle tuning, gait issues, latency fixes, etc.) before generating the deploy_info.json.
 
 ---
 

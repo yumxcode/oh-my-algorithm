@@ -10,6 +10,25 @@
 
 ---
 
+## Session Resumption Check (run FIRST, before anything else)
+
+**Before any new action, check for in-progress work from a previous session:**
+
+1. Read `.oma/trajectory.jsonl` — find any event with `"event":"started"` that has no matching `"event":"completed"` or `"event":"failed"` for the same `expId`.
+2. For each orphaned entry, run:
+   ```bash
+   gm task info --task-id "{taskId}"
+   ```
+3. Based on the task status:
+   - **Running / Queued**: attach to its logs immediately — `gm task logs --task-id "{taskId}" --follow --raw --no-request-log` — and resume from Phase 4.
+   - **Completed**: collect results (Phase 5) and write `results.json`. Update trajectory.
+   - **Failed**: save error log (Bug-Fix Loop entry), write failed `results.json`. Update trajectory.
+   - **Not found / unknown**: log as `"event":"lost"` in trajectory and proceed to launch a new run.
+
+If no orphaned tasks found → proceed to Pre-flight Checklist below.
+
+---
+
 ## Pre-flight Checklist
 
 Before creating any task, run these three checks. If any fail, stop and fix before continuing.
