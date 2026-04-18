@@ -96,34 +96,135 @@ function ask(rl, question) {
   return new Promise(resolve => rl.question(question, resolve));
 }
 
+// ─── Experience file parser ───────────────────────────────────────────────────
+//
+// Parses a Codex-generated experience draft (before it has an [id]).
+// Returns partial fields; missing ones fall back to CLI flags or interactive prompts.
+//
+// Expected draft format (produced by Codex via `oma xp --generate`):
+//
+//   # {name}
+//   **阶段**: deploy
+//   **机器人**: biped   **任务**: locomotion
+//   **标签**: ankle, kd, biped
+//   **来源项目**: agibot_x1_infer  (optional)
+//
+//   ## 描述
+//   一句话描述，用于索引
+//
+//   ## 背景
+//   ...
+//
+//   ## 核心经验
+//   ...
+//
+//   ## 结果
+//   ...
+
+function parseExperienceFile(content) {
+  const result = {};
+
+  // name: first heading, strip any [id] prefix if present
+  const h1 = content.match(/^#\s+(?:\[[^\]]+\]\s+)?(.+)$/m);
+  if (h1) result.name = h1[1].trim();
+
+  // inline header fields
+  const field = (key) => {
+    const m = content.match(new RegExp(`\\*\\*${key}\\*\\*:\\s*([^\\n*]+)`, 'm'));
+    return m ? m[1].trim() : null;
+  };
+
+  const stageRaw = field('阶段');
+  if (stageRaw && VALID_STAGES.includes(stageRaw.split(/\s/)[0])) {
+    result.stage = stageRaw.split(/\s/)[0];
+  }
+
+  const robotRaw = field('机器人');
+  if (robotRaw) result.robot_type = robotRaw.split(/\s/)[0];
+
+  const taskRaw = field('任务');
+  if (taskRaw) result.task = taskRaw.split(/\s/)[0];
+
+  const tagRaw = field('标签');
+  if (tagRaw) {
+    // support both backtick list and comma-separated plain text
+    const backticks = [...tagRaw.matchAll(/`([^`]+)`/g)].map(m => m[1]);
+    result.tags = backticks.length
+      ? backticks
+      : tagRaw.split(',').map(t => t.trim()).filter(Boolean);
+  }
+
+  result.source_project = field('来源项目') || null;
+
+  // section content helpers
+  const section = (heading) => {
+    const m = content.match(new RegExp(`## ${heading}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`));
+    return m ? m[1].trim() : '';
+  };
+
+  result.description = section('描述') || '';
+  result.context     = section('背景') || '';
+  result.insight     = section('核心经验') || '';
+  result.outcome     = section('结果') || '';
+
+  return result;
+}
+
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 /**
- * oma xp add [--stage <s>] [--name <n>] [--description <d>] [--tag <t1,t2>]
+ * oma xp add [--file <path>] [--stage <s>] [--name <n>] [--description <d>] [--tag <t>]
  *
- * --name and --description are REQUIRED (either via flag or interactive prompt).
- * Passing them as flags lets Codex call this non-interactively for the two key
- * index fields; remaining fields are still filled interactively.
+ * Two entry modes:
+ *
+ *   Mode A — File-first (two-step workflow with Codex generation):
+ *     oma xp add --file ankle_kd_experience.md --name "ankle-kd-tuning" \
+ *                --description "降低 ankle kd 消除颤振" --stage deploy
+ *     → Reads content from file, CLI flags override parsed fields.
+ *     → Copies file to ~/.oma/experiences/<id>.md with proper header.
+ *     → Original file is left in place (not deleted).
+ *
+ *   Mode B — Interactive / flag-only (no file):
+ *     oma xp add --stage deploy --name "ankle-kd-tuning" --description "..."
+ *     → Fills remaining fields interactively.
+ *
+ * Required fields: name, description, stage (any mode, any source).
  */
-async function add({ stage, nameCli, descriptionCli, tagsCli } = {}) {
+async function add({ filePath: filePathArg, stage, nameCli, descriptionCli, tagsCli } = {}) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
   console.log('\n📚 OMA 经验库 — 添加新经验\n');
 
-  // ── Stage (required) ────────────────────────────────────────────────────────
-  if (!stage || !VALID_STAGES.includes(stage)) {
+  // ── Load file if provided ────────────────────────────────────────────────────
+  let parsed = {};
+  if (filePathArg) {
+    const absFile = path.resolve(filePathArg);
+    if (!fs.existsSync(absFile)) {
+      console.error(`文件不存在: ${absFile}`);
+      rl.close(); process.exit(1);
+    }
+    parsed = parseExperienceFile(fs.readFileSync(absFile, 'utf8'));
+    console.log(`📄 读取文件: ${absFile}`);
+    if (parsed.name)  console.log(`   解析到经验名: ${parsed.name}`);
+    if (parsed.stage) console.log(`   解析到阶段  : ${parsed.stage}`);
+    console.log('');
+  }
+
+  // ── Stage (CLI flag → file → interactive) ───────────────────────────────────
+  let stage_ = (stage && VALID_STAGES.includes(stage)) ? stage : (parsed.stage || null);
+  if (!stage_) {
     const raw = await ask(rl, `阶段 (${VALID_STAGES.join('/')}): `);
-    stage = raw.trim();
-    if (!VALID_STAGES.includes(stage)) {
-      console.error(`无效阶段: ${stage}`);
+    stage_ = raw.trim();
+    if (!VALID_STAGES.includes(stage_)) {
+      console.error(`无效阶段: ${stage_}`);
       rl.close(); process.exit(1);
     }
   } else {
-    console.log(`阶段: ${stage}`);
+    console.log(`阶段: ${stage_}`);
   }
 
-  // ── name (必填) — 预填时直接确认，否则强制输入直到非空 ──────────────────────
-  let name = nameCli?.trim() || '';
+  // ── name (必填: CLI flag → file → interactive loop) ─────────────────────────
+  let name = nameCli?.trim() || parsed.name || '';
   if (name) {
     console.log(`经验名: ${name}`);
   } else {
@@ -133,8 +234,58 @@ async function add({ stage, nameCli, descriptionCli, tagsCli } = {}) {
     }
   }
 
-  // ── description (必填) — 预填时直接确认，否则强制输入直到非空 ────────────────
-  let description = descriptionCli?.trim() || '';
+  // ── Dedup check: name is the primary key ────────────────────────────────────
+  //
+  // If an experience with the same name already exists, ask the user what to do.
+  // Three options (interactive, Codex-friendly single-char answers):
+  //   o / overwrite  → delete old file + index entry, proceed with same name
+  //   k / keep       → keep both, assign new ID (name will be duplicated in index)
+  //   n / cancel     → abort
+  //
+  // Codex can answer on the user's behalf — the prompt is intentionally simple.
+
+  const existingByName = loadIndex().find(e => e.name === name);
+  if (existingByName) {
+    console.log('');
+    console.log(`⚠️  已存在同名经验:`);
+    console.log(`   ID    : ${existingByName.id}`);
+    console.log(`   阶段  : ${existingByName.stage}`);
+    console.log(`   描述  : ${existingByName.description}`);
+    console.log(`   标签  : ${(existingByName.tags || []).join(', ') || '—'}`);
+    console.log(`   时间  : ${existingByName.added_at?.slice(0, 10) || '—'}`);
+    console.log('');
+
+    let dupAnswer = '';
+    while (!['o', 'k', 'n'].includes(dupAnswer)) {
+      dupAnswer = (await ask(
+        rl,
+        '选择操作  o=覆盖旧经验  k=保留两者(新建ID)  n=取消: '
+      )).trim().toLowerCase();
+      if (!['o', 'k', 'n'].includes(dupAnswer)) {
+        console.log('  请输入 o、k 或 n');
+      }
+    }
+
+    if (dupAnswer === 'n') {
+      console.log('已取消。');
+      rl.close();
+      process.exit(0);
+    }
+
+    if (dupAnswer === 'o') {
+      // Remove old file and index entry
+      const oldFile = xpFilePath(existingByName.id);
+      if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile);
+      const newIndex = loadIndex().filter(e => e.id !== existingByName.id);
+      saveIndex(newIndex);
+      console.log(`   已删除旧经验: ${existingByName.id}`);
+    }
+    // dupAnswer === 'k': fall through, new ID will be assigned below
+    console.log('');
+  }
+
+  // ── description (必填: CLI flag → file → interactive loop) ──────────────────
+  let description = descriptionCli?.trim() || parsed.description || '';
   if (description) {
     console.log(`描述: ${description}`);
   } else {
@@ -144,71 +295,83 @@ async function add({ stage, nameCli, descriptionCli, tagsCli } = {}) {
     }
   }
 
-  // ── 其余字段（选填）──────────────────────────────────────────────────────────
-  const robot_type = (await ask(rl, '机器人类型 (biped/quadruped/arm/wheel/other): ')).trim() || 'other';
-  const task       = (await ask(rl, '任务类型 (locomotion/manipulation/navigation/other): ')).trim() || 'other';
-  const context    = (await ask(rl, '背景/场景 (什么情况下发现的): ')).trim();
-  const insight    = (await ask(rl, '核心经验 (做了什么，为什么有效): ')).trim();
-  const outcome    = (await ask(rl, '结果/收益 (量化或描述): ')).trim();
+  // ── 其余字段（CLI flag → file → interactive，均可跳过）──────────────────────
+  // robot_type
+  const robotDefault = parsed.robot_type || '';
+  const robotPrompt  = robotDefault
+    ? `机器人类型 (已解析: ${robotDefault}，回车确认): `
+    : '机器人类型 (biped/quadruped/arm/wheel/other): ';
+  const robot_type = ((await ask(rl, robotPrompt)).trim() || robotDefault || 'other');
 
-  const tagPrompt = tagsCli
-    ? `标签 (已预填: ${tagsCli}，回车确认或覆盖): `
+  // task
+  const taskDefault = parsed.task || '';
+  const taskPrompt  = taskDefault
+    ? `任务类型 (已解析: ${taskDefault}，回车确认): `
+    : '任务类型 (locomotion/manipulation/navigation/other): ';
+  const task = ((await ask(rl, taskPrompt)).trim() || taskDefault || 'other');
+
+  // context / insight / outcome — use file content if available, still let user edit
+  const contextDefault = parsed.context || '';
+  const context = filePathArg && contextDefault
+    ? contextDefault   // trust the file; don't re-ask
+    : (await ask(rl, '背景/场景 (什么情况下发现的): ')).trim() || contextDefault;
+
+  const insightDefault = parsed.insight || '';
+  const insight = filePathArg && insightDefault
+    ? insightDefault
+    : (await ask(rl, '核心经验 (做了什么，为什么有效): ')).trim() || insightDefault;
+
+  const outcomeDefault = parsed.outcome || '';
+  const outcome = filePathArg && outcomeDefault
+    ? outcomeDefault
+    : (await ask(rl, '结果/收益 (量化或描述): ')).trim() || outcomeDefault;
+
+  // tags: CLI flag takes priority, else file, else interactive
+  const tagsDefault = parsed.tags?.join(',') || '';
+  const effectiveTagsCli = tagsCli || (parsed.tags?.length ? tagsDefault : null);
+  const tagPrompt = effectiveTagsCli
+    ? `标签 (已解析/预填: ${effectiveTagsCli}，回车确认或覆盖): `
     : '标签 (逗号分隔，如: ankle,kd,biped): ';
-  const tags_raw = (await ask(rl, tagPrompt)).trim() || tagsCli || '';
-  const src      = (await ask(rl, '来源项目 (可选，回车跳过): ')).trim();
+  const tags_raw = (await ask(rl, tagPrompt)).trim() || effectiveTagsCli || '';
+
+  const src = parsed.source_project ||
+    (await ask(rl, '来源项目 (可选，回车跳过): ')).trim();
 
   rl.close();
 
   const tags = tags_raw.split(',').map(t => t.trim()).filter(Boolean);
-  const id   = generateId(stage);
+  const id   = generateId(stage_);
 
-  const entry = {
-    id,
-    name,
-    stage,
-    robot_type,
-    task,
-    description,   // ← shown in index for quick relevance check
-    tags,
+  // ── Write experience file to ~/.oma/experiences/<id>.md ─────────────────────
+  ensureDirs();
+  const destPath = xpFilePath(id);
+  const fileContent = renderExperienceFile({
+    id, name, stage: stage_, robot_type, task, description, tags,
+    context, insight, outcome,
     added_at: new Date().toISOString(),
     source_project: src || null,
-    // full content below — stored only in the .md file
-    _context: context,
-    _insight: insight,
-    _outcome: outcome,
-  };
-
-  // 1. Write experience file
-  ensureDirs();
-  const filePath = xpFilePath(id);
-  const fileContent = renderExperienceFile({
-    ...entry,
-    context: entry._context,
-    insight: entry._insight,
-    outcome: entry._outcome,
   });
-  fs.writeFileSync(filePath, fileContent, 'utf8');
+  fs.writeFileSync(destPath, fileContent, 'utf8');
 
-  // 2. Append to index (index stores only lightweight fields)
+  if (filePathArg) {
+    console.log(`\n   原文件保留: ${path.resolve(filePathArg)}`);
+    console.log(`   已归档至  : ${destPath}`);
+  }
+
+  // ── Update index ─────────────────────────────────────────────────────────────
   const indexEntry = {
-    id,
-    name,
-    stage,
-    robot_type,
-    task,
-    description,
-    tags,
-    added_at: entry.added_at,
-    source_project: entry.source_project,
+    id, name, stage: stage_, robot_type, task, description, tags,
+    added_at: new Date().toISOString(),
+    source_project: src || null,
   };
   const index = loadIndex();
   index.push(indexEntry);
   saveIndex(index);
 
-  console.log(`\n✅ 经验已保存`);
+  console.log(`\n✅ 经验已归档`);
   console.log(`   ID   : ${id}`);
   console.log(`   名称 : ${name}`);
-  console.log(`   文件 : ${filePath}`);
+  console.log(`   文件 : ${destPath}`);
   console.log(`   索引 : ${GLOBAL_XP_INDEX}\n`);
 }
 
@@ -505,8 +668,9 @@ Codex 推荐使用流程:
   3. oma xp search "<词>" --stage <s>  有明确关键词时直接全文搜索
 
 用法:
-  oma xp add [--stage <s>] [--name <n>] [--description <d>] [--tag <t1,t2>]
-                                               添加新经验（name/description 必填）
+  oma xp add [--file <path>] [--stage <s>] [--name <n>] [--description <d>] [--tag <t>]
+                                               归档经验（name/description/stage 必填）
+                                               --file: 指定 Codex 生成的草稿文件路径
   oma xp tag <id> <tag1> [tag2 ...]            为已有经验追加标签
   oma xp index [--stage <s>] [--tag <t>]       打印轻量索引
                [--format table|md|json]
@@ -519,8 +683,19 @@ Codex 推荐使用流程:
 有效阶段: ${VALID_STAGES.join(', ')}
 
 示例:
+  # 两步工作流（推荐）
+  # Step 1: 在 Codex 中说 "oma xp --generate 帮我把本次 ankle 调参整理成经验"
+  #         → Codex 生成 ankle_kd_experience.md 到当前目录
+  # Step 2: 归档
+  oma xp add --file ankle_kd_experience.md --name "ankle-kd-tuning" \
+             --description "降低 ankle kd 消除颤振" --stage deploy
+
+  # 纯 flag 模式（无文件）
   oma xp add --stage deploy --name ankle-kd-tuning --description "降低 ankle kd 消除颤振" --tag ankle,kd
-  oma xp add --stage tune   # 纯交互模式，name/description 会强制提示直到填写
+
+  # 纯交互模式
+  oma xp add --stage tune
+
   oma xp tag deploy-003 biped locomotion
   oma xp index --stage deploy --format md
   oma xp search "ankle kd" --stage deploy
@@ -535,14 +710,15 @@ async function xp(args = [], flags = {}) {
   const stage       = flags['--stage']       || null;
   const tag         = flags['--tag']         || null;
   const format      = flags['--format']      || undefined;
-  const nameCli     = flags['--name']        || null;   // ← new
-  const descCli     = flags['--description'] || flags['--desc'] || null;  // ← new
+  const nameCli     = flags['--name']        || null;
+  const descCli     = flags['--description'] || flags['--desc'] || null;
+  const fileCli     = flags['--file']        || null;   // ← new: path to generated .md
   const id          = args[1] || null;
   const newTags     = args.slice(2);
   const tagsCli     = tag || null;
 
   switch (sub) {
-    case 'add':     return add({ stage, nameCli, descriptionCli: descCli, tagsCli });
+    case 'add':     return add({ filePath: fileCli, stage, nameCli, descriptionCli: descCli, tagsCli });
     case 'tag':     return tagCmd({ id, newTags });
     case 'index':   return indexCmd({ stage, tag, format });
     case 'list':    return list({ stage, tag, format });

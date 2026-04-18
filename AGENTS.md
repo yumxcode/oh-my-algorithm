@@ -183,6 +183,7 @@ When the user message contains a mapped keyword, activate the corresponding skil
 | "deploy", "sim2real", "hardware test", "real robot", "productionize" | `$deploy` | Read `.oma/skills/deploy/SKILL.md`, build deployment artifacts |
 | "consolidate", "update memory", "record findings", "what did we learn" | `$consolidate` | Read `.oma/skills/consolidate/SKILL.md`, update memory.md |
 | "go <stage>", "skip to", "jump to", "just do", "standalone" | Standalone | Write `.oma/standalone.json`, enter named stage directly |
+| "oma xp --generate", "整理成经验", "记录为经验", "save as experience" | `xp-generate` | Generate experience draft file (see XP Generate Protocol below) |
 
 **Robot-specific keyword detection**:
 
@@ -285,6 +286,74 @@ This covers both the sweep and the final test-set evaluation.
 
 If consolidation is skipped, the next session will repeat already-explored directions. This is the highest-cost failure mode in iterative robot algorithm development — hyperparameter regions that don't work in sim also won't work on hardware, and rediscovering them is expensive.
 </consolidate_trigger>
+
+---
+
+## XP Generate Protocol
+
+When the user message triggers the `xp-generate` keyword (e.g. `oma xp --generate "..."`, "帮我把XXX整理成经验", "save this as an experience"), generate a structured experience draft file in the **current project directory**.
+
+### Step 1 — Understand what to capture
+
+Read the user's intent from the generate instruction. Common patterns:
+- "帮我把本次 ankle kd 调参整理成经验" → summarize the current session's tuning findings
+- "把 round 2 的结论整理成经验" → extract from sim2real results
+- "记录这次 reward hacking 的解决方法" → capture a specific problem+solution
+
+If the instruction refers to session content (e.g. "本次调参"), read relevant `.oma/` files first:
+- `deploy/sim2real/results/` for deploy experiences
+- `.oma/experiments/*/results.json` + `verdict.md` for tune experiences
+- `.oma/designs/design-{id}.md` for design experiences
+
+### Step 2 — Generate the draft file
+
+Create a file named `{descriptive-name}_experience.md` in the current directory (NOT in `~/.oma/`).
+
+**Required format** (must be parseable by `oma xp add --file`):
+
+```markdown
+# {experience-name-in-kebab-case}
+
+**阶段**: {design|tune|deploy}
+**机器人**: {biped|quadruped|arm|wheel|other}   **任务**: {locomotion|manipulation|navigation|other}
+**标签**: {tag1}, {tag2}, {tag3}
+**来源项目**: {current project name}
+
+## 描述
+{一句话，写给索引看的，让 Codex 能快速判断是否相关。要具体，避免泛泛。}
+
+## 背景
+{什么情况下发现的？什么症状触发了这次调查？}
+
+## 核心经验
+{具体做了什么？参数怎么变的？为什么有效？写得足够具体，让另一个项目的人能直接用。}
+
+## 结果
+{量化结果优先。例如："颤振消失，站立稳定性通过 60s 测试，进入 round 3"}
+```
+
+**Quality rules for generated content:**
+- `描述` must be specific enough that Codex can decide relevance in 1 read — avoid "优化了参数", prefer "将 ankle kd 从 2.0 降至 0.8 消除 20Hz 颤振"
+- `核心经验` must include concrete values (parameter names + before/after values) when applicable
+- `标签` must include: robot type, task type, and at least 2 problem-specific tags
+- Do not fabricate numbers — only use values from session context or explicitly stated by user
+
+### Step 3 — Tell the user the next step
+
+After writing the file, output exactly:
+
+```
+📄 经验草稿已生成: {filename}_experience.md
+
+请检查内容，确认后运行以下命令归档到全局经验库：
+
+  oma xp add --file {filename}_experience.md \
+             --name "{experience-name}" \
+             --description "{一句话描述}" \
+             --stage {stage}
+```
+
+Do NOT run `oma xp add` automatically. The user should review the draft before archiving.
 
 ---
 

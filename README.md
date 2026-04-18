@@ -141,7 +141,34 @@ oma go off                  # 关闭 standalone，恢复门控
 
 **索引与内容分离**：Codex 先读 `xp-index.json` 快速判断哪些经验相关，再按需读具体 `.md` 文件——避免经验库增大后每次都加载全部内容。
 
-#### Codex 推荐查阅流程
+#### 两步工作流（推荐）
+
+经验的录入分两步，内容由 Codex 生成、归档由 CLI 完成：
+
+**Step 1 — 在 Codex 中生成草稿**
+
+在 Codex 对话中输入（关键词触发 `xp-generate` 协议）：
+
+```
+oma xp --generate "帮我把本次 ankle kd 调参的结论整理成经验，要包含前后参数对比"
+```
+
+Codex 读取当前会话上下文（`.oma/` 状态文件、本次对话内容），生成结构化草稿文件到当前目录，例如 `ankle_kd_tuning_experience.md`，并告知下一步命令。
+
+**Step 2 — 用户确认后 CLI 归档**
+
+检查草稿内容，满意后运行：
+
+```bash
+oma xp add --file ankle_kd_tuning_experience.md \
+           --name "ankle-kd-tuning" \
+           --description "将 ankle kd 从 2.0 降至 0.8 消除 20Hz 颤振" \
+           --stage deploy
+```
+
+CLI 自动从文件解析背景/核心经验/结果等字段，分配 ID，归档到 `~/.oma/experiences/`，更新全局索引。原草稿文件保留在原位置。
+
+#### Codex 查阅流程
 
 ```bash
 # Step 1：扫索引（只读 xp-index.json，轻量）
@@ -154,36 +181,34 @@ oma xp show deploy-001
 oma xp search "ankle chatter" --stage deploy
 ```
 
-#### 命令参考
+#### 完整命令参考
 
 ```bash
-# 添加经验（--name 和 --description 必填）
-oma xp add --stage deploy --name "ankle-kd-tuning" --description "降低 ankle kd 消除颤振" --tag ankle,kd
-oma xp add --stage tune    # 纯交互模式，name/description 会强制提示直到填写
+# 归档经验
+oma xp add --file ankle_kd_experience.md --name "ankle-kd-tuning" \
+           --description "降低 ankle kd 消除颤振" --stage deploy   # 文件模式（推荐）
+oma xp add --stage deploy --name "..." --description "..."          # 纯 flag 模式
+oma xp add --stage tune                                             # 纯交互模式
 
-# 为已有经验追加标签
-oma xp tag deploy-001 biped locomotion
+# 标签管理
+oma xp tag deploy-001 biped locomotion    # 为已有经验追加标签
 
-# 打印轻量索引（Codex 入口）
-oma xp index --format md
+# 查阅
+oma xp index --format md                  # 扫轻量索引（Codex 入口）
 oma xp index --stage deploy --tag ankle --format md
-
-# 查看单条经验完整内容
-oma xp show deploy-001
-
-# 全文搜索
-oma xp search "reward hacking"
+oma xp show deploy-001                    # 读单条完整内容
+oma xp search "reward hacking"            # 两阶段全文搜索
 oma xp search "biped latency" --stage deploy
 
-# 删除 / 重建索引
+# 维护
 oma xp delete tune-003
-oma xp reindex              # 从 experiences/*.md 重建索引（手动编辑文件后用）
+oma xp reindex                            # 从 experiences/*.md 重建索引
 ```
 
 **经验条目字段**（索引中）：`id` / `name` / `stage` / `robot_type` / `task` / `description` / `tags`  
 **经验文件完整字段**：以上全部 + `背景` / `核心经验` / `结果` / `来源项目`
 
-**质量原则**：只存已验证的成功路径；`description` 写给 Codex 看（一句话让它判断是否相关）；`outcome` 优先量化；`tags` 必填机器人类型和任务类型。
+**质量原则**：只存已验证的成功路径；`description` 一句话让 Codex 判断相关性，要具体（"将 ankle kd 从 2.0 降至 0.8"，不是"优化了参数"）；`outcome` 优先量化；`tags` 必含机器人类型和任务类型。
 
 ---
 
