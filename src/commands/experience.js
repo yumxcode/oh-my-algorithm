@@ -345,23 +345,55 @@ async function add({ filePath: filePathArg, stage, nameCli, descriptionCli, tags
   // ── Write experience file to ~/.oma/experiences/<id>.md ─────────────────────
   ensureDirs();
   const destPath = xpFilePath(id);
-  const fileContent = renderExperienceFile({
-    id, name, stage: stage_, robot_type, task, description, tags,
-    context, insight, outcome,
-    added_at: new Date().toISOString(),
-    source_project: src || null,
-  });
-  fs.writeFileSync(destPath, fileContent, 'utf8');
+  const now = new Date().toISOString();
 
+  let fileContent;
   if (filePathArg) {
+    // Mode A: preserve original file content verbatim — only patch the title line
+    // to inject the assigned ID, and add any missing metadata fields.
+    let origContent = fs.readFileSync(path.resolve(filePathArg), 'utf8');
+
+    // Update title: "# [old-id] name"  OR  "# name"  →  "# [id] name"
+    origContent = origContent.replace(
+      /^(#[ \t]+)(?:\[[^\]]+\][ \t]+)?(.+)$/m,
+      `$1[${id}] $2`
+    );
+
+    // Inject **添加时间** after the **标签** line if not already present
+    if (!/\*\*添加时间\*\*/.test(origContent)) {
+      origContent = origContent.replace(
+        /(\*\*标签\*\*:[^\n]*\n)/,
+        `$1**添加时间**: ${now.slice(0, 10)}  \n`
+      );
+    }
+
+    // Inject **来源项目** after **添加时间** if src was provided and field is missing
+    if (src && !/\*\*来源项目\*\*/.test(origContent)) {
+      origContent = origContent.replace(
+        /(\*\*添加时间\*\*:[^\n]*\n)/,
+        `$1**来源项目**: ${src}  \n`
+      );
+    }
+
+    fileContent = origContent;
     console.log(`\n   原文件保留: ${path.resolve(filePathArg)}`);
     console.log(`   已归档至  : ${destPath}`);
+  } else {
+    // Mode B: no source file — render from collected fields
+    fileContent = renderExperienceFile({
+      id, name, stage: stage_, robot_type, task, description, tags,
+      context, insight, outcome,
+      added_at: now,
+      source_project: src || null,
+    });
   }
+
+  fs.writeFileSync(destPath, fileContent, 'utf8');
 
   // ── Update index ─────────────────────────────────────────────────────────────
   const indexEntry = {
     id, name, stage: stage_, robot_type, task, description, tags,
-    added_at: new Date().toISOString(),
+    added_at: now,
     source_project: src || null,
   };
   const index = loadIndex();
