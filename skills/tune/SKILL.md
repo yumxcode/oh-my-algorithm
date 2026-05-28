@@ -6,7 +6,7 @@ For robot RL, this includes sweeping: reward coefficients, DR ranges, network ar
 
 This skill subsumes the former `$evaluate` skill. Final test-set evaluation is the natural terminus of a tune session and is executed here.
 
-**Read also**: `skills/gradmotion/SKILL.md` — sweep experiments are also launched via `gm task create/run`, same as `$train`.
+**Read also**: `.oma/skills/gradmotion/SKILL.md` — sweep experiments are also launched via `gm task create/run`, same as `$train`.
 
 **Gate in**: At least one `experiments/{exp-id}/results.json` with `phase: train` exists.
 **Standalone entry**: Allowed via `oma go tune`. If no prior train results exist, ask user: "Do you have existing experiment results to sweep from? If yes, provide exp-id and metric. If no, we'll run a first baseline first."

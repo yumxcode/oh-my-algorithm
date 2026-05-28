@@ -2,7 +2,7 @@
 
 **Purpose**: Launch a robot RL training run on Gradmotion via `gm` CLI, monitor logs for RL-specific failure modes, collect metric results, and handle failures — including routing code bugs back to `$implement`.
 
-**Read first**: `skills/gradmotion/SKILL.md` — all `gm` command details, field rules, and safety constraints live there. This file covers only the OMA-specific workflow on top of gm.
+**Read first**: `.oma/skills/gradmotion/SKILL.md` — all `gm` command details, field rules, and safety constraints live there. This file covers only the OMA-specific workflow on top of gm.
 
 **Gate in**: `.oma/impl/impl-checklist.md` all `✓` AND `.oma/impl/github.json` exists (code pushed).
 **Standalone entry**: Allowed via `oma go train`. If `github.json` is missing, ask for: repoUrl, branch, commitHash, and entry point command.
@@ -317,7 +317,7 @@ To continue a previous run from a checkpoint:
 gm task model list --task-id "{source taskId}" --page-num 1 --page-size 20
 ```
 
-Use the `policUrl` field from the desired checkpoint as `checkPointFilePath` in the resume JSON (see resume template in `skills/gradmotion/SKILL.md`).
+Use the `policUrl` field from the desired checkpoint as `checkPointFilePath` in the resume JSON (see resume template in `.oma/skills/gradmotion/SKILL.md`).
 
 Create a new exp-id for the resume run. Only call `gm task run` if the user explicitly confirms.
 
