@@ -1,6 +1,6 @@
 ---
-name: gradmotion-cli
-description: Operates gm-cli (gm): auth/config/profile/project/task workflows, safe execution patterns, and troubleshooting. Use when the user mentions gm, gm-cli, Gradmotion, API key, base_url, profile, auth login/logout/whoami/status, project list/create/edit/delete/info, task create/edit/copy/list/info/run/stop/delete/logs/resource/image/storage/data/hp/env/params/tag/batch, or wants CLI automation.
+name: gm-cli
+description: Operates gm-cli (gm): auth/config/profile/project/task workflows, model/checkpoint lookup and download, safe execution patterns, and troubleshooting. Use when the user mentions gm, gm-cli, Gradmotion, API key, base_url, profile, auth login/logout/whoami/status, project list/create/edit/delete/info, task create/edit/copy/list/info/run/stop/delete/logs/resource/image/storage/data/hp/env/params/tag/note/batch, checkpoint, model file, pt file, model download, experiment note, task note, or wants CLI automation.
 metadata:
   emoji: "🌐 "
   requires:
@@ -15,11 +15,13 @@ metadata:
 - 认证：`gm auth login/logout/status/whoami`
 - 配置与 profile：`gm config ...`
 - 项目管理：`gm project ...`（list/create/edit/delete/info）
-- 任务管理：`gm task ...`（create/edit/copy/list/info/run/stop/delete/logs/resource/image/storage/data/hp/env/params/tag/batch）
+- 任务管理：`gm task ...`（create/edit/copy/list/info/run/stop/delete/logs/resource/image/storage/data/hp/env/params/tag/note/batch）
 
 ## 安全与约束
 - 不要在对话输出中回显用户的 `api-key` 或完整密钥内容。
-- 高风险操作（`project delete`、`task stop/delete`、`task batch stop/delete`）默认需要二次确认；只有用户明确要求无人值守时才加 `--yes`。
+- **Agent 场景**：当 Agent 通过 shell 工具执行命令时（非交互式终端），必须始终加 `--yes`，因为 Agent 无法响应交互式确认提示。用户在对话中下达指令本身即视为授权确认。
+- **非交互环境（Agent / CI / 管道）**：CLI 检测到 stdin 不是终端后，危险操作不会挂起等待输入，而是直接返回退出码 `2`（`NON_INTERACTIVE` 错误）。Agent 执行危险操作时**必须加 `--yes`**。
+- **写操作推荐先 `--dry-run`**：所有 create/edit/run/stop/delete 等写操作支持 `--dry-run`，预览请求而不实际执行。推荐流程：`--dry-run` 确认 → 去掉 `--dry-run` 正式执行。
 - 涉及文件路径一律使用相对路径（例如 `--file ./payload.json`）。
 - Agent 生成的临时 JSON 文件（如 `create-*.json`、`edit-*.json`、`copy-*.json` 等），在对应的 CLI 命令执行成功后应**立即删除**，避免在工作目录中残留过期的临时文件。
 
@@ -50,11 +52,9 @@ metadata:
 - 绝对路径模式：个别命令（如 `gm task storage list`）会直接请求 `base_url + endpoint`（不自动拼 `/api`）。
 
 ## 首次上手（推荐步骤）
-1. 设置 base_url（落到当前 profile）：
-   - `gm config set base_url "https://YOUR-HOST/prod-api"`
-2. 登录保存 API Key（优先 Keychain，失败回落 config）：
+1. 登录保存 API Key（优先 Keychain，失败回落 config）：
    - `gm auth login --api-key "<YOUR_KEY>"`
-3. 验证：
+2. 验证：
    - `gm auth status`（本地）
    - `gm auth whoami`（请求服务端）
 
@@ -70,12 +70,20 @@ metadata:
 
 ## Task 常用操作
 - 列表：`gm task list --page 1 --limit 50`
+- 按状态筛选：`gm task list --status "3"`（运行中）或 `gm task list --status "3,5,6"`（多状态）
+- 按项目筛选：`gm task list --project-id "PRO_xxx"`
+- 按标签筛选：`gm task list --tag "baseline"`（模糊匹配）
+- 按名称筛选：`gm task list --task-name "v5"`（模糊匹配）
+- 组合筛选：`gm task list --project-id "PRO_xxx" --status "3" --limit 20`
 - 详情：`gm task info --task-id "task_xxx"`
-- Checkpoint 列表：`gm task model list --task-id "task_xxx" --page-num 1 --page-size 20`
+- Checkpoint 列表：`gm task model list --task-id "task_xxx" --page 1 --limit 20`
+- 单 checkpoint 查询：`gm task model list --task-id "task_xxx" --checkpoint "3000" --limit 1`
 - 复制：`gm task copy --file ./copy.json`
 - 运行：`gm task run --task-id "task_xxx"`
-- 停止：`gm task stop --task-id "task_xxx"`（会二次确认）
-- 删除：`gm task delete --task-id "task_xxx"`（会二次确认）
+- 停止：`gm --yes task stop --task-id "task_xxx"`（Agent 必须加 `--yes`，推荐先 `--dry-run`）
+- 删除：`gm --yes task delete --task-id "task_xxx"`（Agent 必须加 `--yes`，推荐先 `--dry-run`）
+- 更新笔记：`gm task note update --task-id "task_xxx" --note "<p>实验记录内容</p>"` 或 `--file ./note.json`
+- 查看笔记：`gm task note get --task-id "task_xxx"`
 
 日志：
 - 单次：`gm task logs --task-id "task_xxx"`
@@ -84,10 +92,10 @@ metadata:
 - 不向 stderr 打请求元数据：`gm task logs ... --no-request-log`；与 `--raw` 搭配可得到纯净日志流。
 
 资源/镜像/存储：
-- 资源列表：`gm task resource list --goods-back-category 3 --page-num 1 --page-size 10`
+- 资源列表：`gm task resource list --goods-back-category 3 --page 1 --limit 10`
   > 返回字段说明：`goodsId` 对应 `taskBaseInfo.goodsId`（填任务时使用此值）；`goodsBackId` 是后台 SKU 标识，**不可**混用。
 - 官方镜像：`gm task image official`
-- 个人镜像：`gm task image personal --version-status 1 --page-num 1 --page-size 50`
+- 个人镜像：`gm task image personal --version-status 1 --page 1 --limit 50`
 - 镜像版本：`gm task image versions --image-id "img_xxx"`
   > 返回字段说明：`id` 对应 `taskBaseInfo.imageVersion`（填任务时使用此值），`versionCode` 仅为可读标识，**不可**用于 `imageVersion` 字段。
 - 个人存储：`gm task storage list --folder-path "personal/"`
@@ -96,15 +104,30 @@ metadata:
 - 图表 keys：`gm task data keys --task-id "task_xxx"`
 - 图表数据（加速模式）：`gm task data get --task-id "task_xxx" --data-key "Train/mean_reward" --sampling-mode "accelerate" --max-data-points 10000 --end-time "2026-03-19 15:00:00"`
 - 图表数据（精细模式）：`gm task data get --task-id "task_xxx" --data-key "Train/mean_reward" --sampling-mode "precise" --end-time "2026-03-19 15:00:00"`
-  > **采样模式说明**：已完成/已终止的任务可选 `accelerate`（加速）或 `precise`（精细）；运行中的任务只能使用 `precise` 模式。`--end-time` 必传，通常传当前时间。
+  > **采样模式说明**：已完成/已终止的任务可选 `accelerate`（加速）或 `precise`（精细）；运行中的任务只能使用 `precise` 模式。`--end-time` 可选，不传时后端默认取当前时间。
 - 图表下载：`gm task data download --task-id "task_xxx"`
 - 超参读取：`gm task hp get --task-id "task_xxx"`
 - 运行环境：`gm task env get --task-id "task_xxx"`
+
+## 模型文件下载（pt）
+适用场景：
+- 用户要下载某个任务的 checkpoint 对应模型文件
+
+当前方式：
+- `gm` 目前已有 `gm task model list`，可调用 `POST /api/task/model/info`
+- 取对应 checkpoint 中的`policUrlDown`链接，再用 `curl` 下载，默认保存到当前项目根路径下
 
 任务打标签：
 - 更新标签：`gm task tag update --task-id "task_xxx" --tags "tag1,tag2"` 或 `--file ./tag.json`
 - 查看任务标签：`gm task tag get --task-id "task_xxx"`
 - 用户历史标签列表：`gm task tag list --limit 200`
+
+任务笔记（实验记录）：
+- 更新笔记：`gm task note update --task-id "task_xxx" --note "<p>iter-1: lr=3e-4, reward=850, converged at step 2000</p>"`
+- 通过 JSON 文件更新：`gm task note update --task-id "task_xxx" --file ./note.json`
+- 查看笔记：`gm task note get --task-id "task_xxx"`
+  > **格式要求**：前端笔记组件使用 `react-quill`（富文本 HTML 编辑器），`taskNote` 存储的是 **HTML 片段**，不是 Markdown 或纯文本。Agent 生成笔记时必须使用 HTML 标签（如 `<p>`、`<h3>`、`<ul><li>`、`<strong>`、`<table>` 等），否则在 Web 端会原样显示而非渲染。
+  > **适用场景**：每轮训练/HPO 迭代完成后，将超参配置、训练指标、分析结论记录到任务上，便于后续回溯对比。
 
 > **说明**：任务分享（生成分享链接）需在 Web 端操作，CLI 未提供对应命令。
 
@@ -121,59 +144,149 @@ metadata:
 - `gm task create --file ./create.json`
 - `gm task edit --file ./edit.json`
 
+### `taskCodeInfo.startScript` 强限制
+
+> **硬限制：`startScript` 只能填写 `gm-run` 命令。**
+
+- 合法形式：`gm-run ...`
+- 不允许：`python train.py`、`bash xxx.sh`、`sh xxx.sh`、`./run.sh`、`source ... && ...`、`cd ... && ...` 等非 `gm-run` 启动方式
+- Agent 在生成 `create/edit` JSON 时，若发现 `startScript` 不是以 `gm-run` 开头，应先改写为 `gm-run ...` 或提示用户修正后再执行
+
 超参：
 - `gm task params submit --task-id "task_xxx" --file ./params.json`
 - `gm task params update --task-id "task_xxx" --data '{"...":"..."}'`
 
-## OMA 训练任务操作规范
+## Agent 创建训练任务时自动解析 Git 超参文件路径
 
-> 以下规范适用于通过 OMA `$train` 技能在 Gradmotion 上创建机器人 RL 训练任务，具有最高优先级。
+> **当用户要求创建训练任务并提供了 Git 仓库地址时，Agent 应先主动扫描仓库自动发现超参文件路径（`hparamsPath`）；仅在扫描未识别到候选文件时，再引导用户手动填写或留空。**
 
-### 镜像选择
-- **固定使用 Isaac GYM:preview-4 官方镜像**（`imageId` 通过 `gm task image official` 查询获取）。
-- 执行 `gm task image official` 后，找到 name 包含 `Isaac GYM` 且 tag/version 为 `preview-4` 的条目，取其 `imageId`。
-- 再执行 `gm task image versions --image-id “{imageId}”` 取对应的 `id` 字段（形如 `V000057`）作为 `imageVersion`，**不能使用 `versionCode`**。
+### 触发条件
 
-### 算力资源选择
-- **固定使用 `goodsName` 为 `”1*A10*24G”` 的 GPU 资源**。
-- 执行 `gm task resource list --goods-back-category 3 --page-num 1 --page-size 20` 后，找到 `goodsName == “1*A10*24G”` 的条目，取其 `goodsId` 填入 `taskBaseInfo.goodsId`。
-- `goodsBackId` 是后台 SKU 标识，**不可**混用于 `goodsId`。
+满足以下任一条件时触发此工作流：
+- 用户提供了 Git 仓库地址并要求创建训练任务
+- 用户明确要求解析/扫描仓库中的超参文件
+- 构建 task create JSON 时 `hparamsPath` 未知
 
-### 创建任务方式
-- **始终使用 `--file` 方式提交**，不用 `--data` 或 shell 内联 JSON：
-  ```bash
-  gm task create --file ./create-train.json
-  ```
-- 临时 JSON 文件在 `gm task create` 执行成功后**立即删除**。
+### 工作流步骤
 
-### startScript 规范
-- **`gm-run` 是平台专用执行命令**，相当于 `python`，不要使用 `python` 直接调用。
-- **不需要 cd 到项目目录**，直接写脚本相对路径即可（平台会自动挂载代码根目录）。
-- 正确格式示例：
-  ```
-  gm-run F1_locomotion/humanoid/scripts/train.py --task=x1_dh_stand --headless --max_iterations=500
-  ```
-- 错误示范（不要这样写）：
-  ```bash
-  # ✗ 不要 cd
-  cd F1_locomotion && python humanoid/scripts/train.py
-  # ✗ 不要用 python
-  python train.py --headless
-  ```
+#### 第 1 步：提取 Git 仓库信息
 
-### 填表顺序（OMA $train 标准流程）
-1. `gm task resource list --goods-back-category 3 --page-num 1 --page-size 20` → 取 `goodsId`（`goodsName == “1*A10*24G”`）
-2. `gm task image official` → 取 Isaac GYM preview-4 的 `imageId`
-3. `gm task image versions --image-id “{imageId}”` → 取 `imageVersion`（`id` 字段）
-4. 按模板写出 `create-train.json`，`startScript` 用 `gm-run` 格式
-5. `gm task create --file ./create-train.json` → 取 `taskId`
-6. `gm task run --task-id “{taskId}”`
-7. 删除 `create-train.json`
+从用户提供的 `codeUrl` 中提取：
+- `repo_url`：仓库地址（如 `https://github.com/org/repo.git`）
+- `branch`：分支名（如 `main`），取自 `versionName`
 
----
+#### 第 2 步：获取仓库文件树
+
+使用浅克隆 + ls-tree 获取完整文件列表（不拉取文件内容，速度快）：
+
+```bash
+TEMP_DIR=$(mktemp -d)
+git clone --depth 1 --branch <branch> --no-checkout <repo_url> "$TEMP_DIR" 2>/dev/null
+cd "$TEMP_DIR" && git ls-tree -r --name-only HEAD
+rm -rf "$TEMP_DIR"
+```
+
+**认证处理**：
+- 公开仓库：直接 clone
+- 私有仓库 clone 失败时：提示用户提供 Token，使用 `https://oauth2:<token>@host/path` 格式注入
+- 也可尝试利用本地已配置的 SSH Key 或 Git credential helper
+
+#### 第 3 步：应用超参文件识别规则
+
+对文件树应用以下规则，按置信度排序输出候选列表：
+
+**高置信度（high）——优先推荐**：
+- 文件名包含关键词：`hparam`、`hyper`、`hyperparam`
+- 位于超参专用目录下：`hparams/`、`hyperparams/`
+- 文件名为 `train.yaml`、`train.yml`、`train_config.*`、`training_config.*`
+
+**中置信度（medium）——推荐**：
+- 位于配置目录下（`configs/`、`conf/`、`config/`、`cfg/`、`params/`、`settings/`）且扩展名为 `.yaml`、`.yml`、`.json`、`.toml`、`.cfg`、`.ini`
+- 根目录下文件名含 `config`、`cfg`、`param`、`setting`、`args`、`options` 且扩展名为 `.yaml`、`.yml`、`.json`、`.toml`、`.py`
+- Python 配置文件：`config.py`、`args.py`、`options.py`、`params.py`、`settings.py`
+- Hydra 框架标志：`conf/` 下的 `.yaml` 文件
+
+**低置信度（low）——仅当无更高候选时展示**：
+- 根目录下的通用 `.yaml`/`.yml`/`.json` 文件（排除已知非超参文件后）
+- 深层嵌套（>3 层目录）的配置文件
+
+**强制排除（不作为候选）**：
+- 目录：`node_modules/`、`.git/`、`__pycache__/`、`.venv/`、`venv/`、`env/`、`.tox/`、`dist/`、`build/`、`.eggs/`、`*.egg-info/`、`.github/`、`.gitlab-ci/`、`.circleci/`
+- 依赖/构建文件：`package.json`、`package-lock.json`、`tsconfig.json`、`Dockerfile`、`docker-compose*.yml`、`setup.py`、`setup.cfg`、`pyproject.toml`、`requirements*.txt`、`Pipfile`、`Pipfile.lock`、`poetry.lock`、`Cargo.toml`、`go.mod`、`go.sum`、`Makefile`、`CMakeLists.txt`
+- 文档/元数据：`*.md`、`*.rst`、`LICENSE*`、`MANIFEST.in`、`.gitignore`、`.gitmodules`
+- Lint/测试配置：`.pre-commit-config.yaml`、`.flake8`、`.pylintrc`、`tox.ini`、`pytest.ini`、`mypy.ini`
+- CI/CD：`.github/workflows/*.yml`、`.gitlab-ci.yml`、`.travis.yml`、`Jenkinsfile`
+
+#### 第 4 步（可选）：预览候选文件内容辅助判断
+
+当存在多个中/高置信度候选且 Agent 无法仅凭路径确定时，checkout 并读取候选文件内容：
+
+```bash
+cd "$TEMP_DIR" && git checkout HEAD -- <candidate_path> && cat <candidate_path>
+```
+
+置信度提升依据（文件内含以下关键键名）：
+- RL 超参：`learning_rate`、`lr`、`gamma`、`discount`、`reward`、`max_iterations`、`num_envs`、`num_steps`、`ppo`、`sac`、`dqn`
+- 通用 ML 超参：`batch_size`、`num_epochs`、`optimizer`、`hidden_size`、`dropout`、`weight_decay`、`scheduler`
+
+排除依据（文件内容为非超参配置）：
+- 环境变量/secrets 配置（`DATABASE_URL`、`SECRET_KEY`、`AWS_`）
+- 日志配置（`logging`、`handlers`、`formatters`）
+- 部署/基础设施配置（`replicas`、`ports`、`volumes`、`services`）
+
+#### 第 5 步：向用户确认
+
+将候选列表按置信度排序展示，格式：
+
+```
+在仓库 your-org/your-repo (main) 中发现以下超参文件候选：
+
+1. [高] configs/train.yaml — 位于 configs/ 目录，文件名含 train
+2. [中] config.py — 根目录 Python 配置文件
+3. [中] params/reward.json — 位于 params/ 目录
+
+请确认使用哪个作为 hparamsPath？（输入序号或自定义路径）
+```
+
+**特殊情况处理**：
+- 仅 1 个高置信度候选：直接建议使用，告知用户可更改
+- 无候选：告知用户仓库中未发现明显的超参文件，请手动指定 `hparamsPath` 或留空
+- 用户主动指定了路径：跳过扫描，直接使用用户指定值
+
+#### 第 6 步：填入 create JSON 并继续
+
+用户确认后将路径填入 `taskCodeInfo.hparamsPath`，继续正常的 task create 流程。
+
+> **路径格式要求**：`hparamsPath` 中的文件路径必须从 **Git 仓库项目名（clone 后的目录名）** 开始，例如 `pointfoot-legged-gym/configs/train.yaml`，而不是仓库内的相对路径 `configs/train.yaml`。
+
+### 同时发现 mainCodeUri 和 startScript（可选增强）
+
+扫描文件树时可同时识别训练入口脚本，减少用户手填工作量：
+- 高置信度入口脚本：`train.py`、`main.py`、`run.py`、`run_training.py`
+- 中置信度入口脚本：根目录或 `scripts/` 下文件名含 `train`、`run` 的 `.py` 文件
+- 发现后建议填入 `mainCodeUri`，并自动生成 `startScript`：`gm-run <mainCodeUri> --task=<task_name> --headless`
+
+### 完整示例流程
+
+```
+用户：帮我创建一个训练任务，代码仓库 https://github.com/my-org/rl-project.git，main 分支
+
+Agent 执行：
+  1. git clone --depth 1 --branch main --no-checkout → 获取文件树
+  2. 识别候选：configs/train.yaml [高]、config.py [中]
+  3. 同时发现入口脚本：train.py
+  4. 向用户确认：
+     "发现超参文件 your-repo/configs/train.yaml（高置信度），训练入口 train.py，是否使用？"
+  5. 用户确认 → 构建 JSON：
+     hparamsPath="your-repo/configs/train.yaml"
+     mainCodeUri="your-repo/legged_gym/scripts/train.py"
+     startScript="gm-run your-repo/legged_gym/scripts/train.py --task=pointfoot_flat --headless"
+  6. gm task create --file ./create-train.json
+  7. 清理临时 JSON 文件
+```
 
 ## 最小可运行 JSON 模版（训练任务）
-下面是一个”可创建并可运行”的最小模板（请替换示例值）：
+下面是一个"可创建并可运行"的最小模板（请替换示例值）：
 
 ```json
 {
@@ -192,9 +305,9 @@ metadata:
   "taskCodeInfo": {
     "codeType": "2",
     "codeUrl": "[{\"codeUrl\":\"https://github.com/your-org/your-repo.git\",\"versionType\":\"1\",\"versionName\":\"main\"}]",
-    "mainCodeUri": "train.py",
-    "hparamsPath": "configs/train.yaml",
-    "startScript": "gm-run your_project/scripts/train.py --task=your_task --headless --max_iterations=500",
+    "mainCodeUri": "your-repo/legged_gym/scripts/train.py",
+    "hparamsPath": "your-repo/configs/train.yaml",
+    "startScript": "gm-run your-repo/legged_gym/scripts/train.py --task=pointfoot_flat --headless",
     "isOpen": "1"
   },
   "runtimeReminderConfig": {
@@ -210,7 +323,7 @@ metadata:
 - `gm task logs --task-id "task_xxx" --follow`
 
 ## 最小可运行 JSON 模版（恢复训练任务）
-下面是一个“基于已有任务 checkpoint 恢复训练”的最小模板（请替换示例值）：
+下面是一个"基于已有任务 checkpoint 恢复训练"的最小模板（请替换示例值）：
 
 ```json
 {
@@ -229,9 +342,9 @@ metadata:
   "taskCodeInfo": {
     "codeType": "2",
     "codeUrl": "[{\"codeUrl\":\"https://github.com/your-org/your-repo.git\",\"versionType\":\"1\",\"versionName\":\"main\"}]",
-    "mainCodeUri": "train.py",
-    "hparamsPath": "configs/train.yaml",
-    "startScript": "gm-run your_project/scripts/train.py --task=your_task --headless --max_iterations=4000",
+    "mainCodeUri": "your-repo/legged_gym/scripts/train.py",
+    "hparamsPath": "your-repo/configs/train.yaml",
+    "startScript": "gm-run your-repo/legged_gym/scripts/train.py --task=pointfoot_flat --headless --max_iterations=3000",
     "isOpen": "1",
     "checkPointFilePath": "upload/2026/3/17/model_3000_xxx.pt",
     "checkPointMountPath": "your-project-root/",
@@ -249,7 +362,7 @@ metadata:
 建议恢复步骤：
 - **先获取任务列表**：执行 `gm task list --page 1 --limit 50`，展示任务列表供用户选择。
 - **用户选择源任务**：根据列表中的 `taskId`、任务名称、任务状态等，让用户确认或选择要恢复的源任务（得到 `task_source_xxx`）。
-- **再获取该任务的 checkpoint**：执行 `gm task model list --task-id "task_source_xxx" --page-num 1 --page-size 20`，找到目标 checkpoint。
+- **再获取该任务的 checkpoint**：执行 `gm task model list --task-id "task_source_xxx" --page 1 --limit 20`，找到目标 checkpoint。
 - 将返回结果中的 `policUrl` 填入 `taskCodeInfo.checkPointFilePath`
 - 将 `resumeFromTaskId` / `resumeFromTaskName` / `resumeFromCheckPoint` 与源任务、源 checkpoint 保持一致
 - `gm task create --file ./create-resume-train.json`
@@ -258,7 +371,7 @@ metadata:
 恢复训练任务的软提示：
 1. 优先复用源任务的 `goodsId`、`imageId`、`imageVersion`、`codeUrl`、`mainCodeUri`、`hparamsPath`，避免环境不一致导致恢复失败。
 2. `checkPointFilePath` 应优先使用 `gm task model list` 返回的 `policUrl`，不要手写猜测路径。
-3. 若用户只是想“基于 checkpoint 新建恢复任务”，默认先 `create`，不要自动 `run`；只有用户明确要求时才执行运行。
+3. 若用户只是想"基于 checkpoint 新建恢复任务"，默认先 `create`，不要自动 `run`；只有用户明确要求时才执行运行。
 
 ### 关于本地 zip 压缩包上传（`codeType=1`）—— 不支持
 
@@ -337,6 +450,7 @@ gm task edit --file ./edit-task.json
 - `taskBaseInfo.projectId`：必填，长度 `1..20`
 - `taskBaseInfo.taskName`：必填，长度 `1..100`
 - `taskCodeInfo.codeType`：必填，长度 `1..2`
+- `taskCodeInfo.startScript`：若传入，必须是 `gm-run` 命令，且必须以 `gm-run` 开头
 
 `WARN`：
 - `taskBaseInfo.taskDescription`：可选，最大 `1000`
@@ -352,6 +466,7 @@ gm task edit --file ./edit-task.json
 `STRICT`（在 create 基础上追加）：
 - `taskBaseInfo.taskId`：必填，长度 `1..20`
 - `taskCodeInfo.taskId`：必填，须与 `taskBaseInfo.taskId` 一致（后端不会自动同步，缺失会导致代码表更新失效）
+- `taskCodeInfo.startScript`：若传入，必须继续保持为 `gm-run` 命令，禁止改成其他启动方式
 - **必须提交完整字段**：编辑前先 `gm task info` 获取原数据，合并后再提交（参见上方「`gm task edit` 必须提交完整数据」章节）
 
 `WARN`：
@@ -362,9 +477,12 @@ gm task edit --file ./edit-task.json
 - 无必须拦截项（可空请求体，CLI 会补 page）
 
 `WARN`：
-- `pageNum`：建议 `>=1`
-- `pageSize`：建议 `1..200`（Agent 侧保护阈值，非后端硬限制）
-- 若带过滤字段，建议遵循：`projectId <= 20`、`taskName <= 100`、`taskDescription <= 1000`
+- `page`：建议 `>=1`
+- `limit`：建议 `1..200`（Agent 侧保护阈值，非后端硬限制）
+- `--status`：任务状态码，支持逗号分隔多值（1=created,2=pending,3=running,4=deploying,5=finished,6=failed,7=stopped）
+- `--project-id`：按项目 ID 精确匹配，长度 `<=20`
+- `--tag`：按标签模糊匹配
+- `--task-name`：按任务名模糊匹配，长度 `<=100`
 
 ### 4) `gm task info` -> `GET /api/task/info/{task_id}`
 `STRICT`：
@@ -375,9 +493,10 @@ gm task edit --file ./edit-task.json
 - `task-id`：必填，长度 `1..20`
 
 `WARN`：
-- `page-num`：建议 `>=1`
-- `page-size`：建议 `1..200`
+- `page`：建议 `>=1`
+- `limit`：建议 `1..200`
 - `checkpoint`：可选筛选条件
+- 返回项通常包含 `policUrl` 与 `policUrlDown`；若用户目标是"下载模型文件"，使用 `policUrlDown`
 
 ### 6) `gm task run` -> `POST /api/task/run` -> `TaskOperation`
 `STRICT`：
@@ -444,11 +563,11 @@ gm task edit --file ./edit-task.json
 
 ### 15) `gm task resource list` -> `GET /api/task/goods/list-by-category`
 `STRICT`：
-- `goods-back-category`：必填，建议值 `3`（训练）或 `4`（开发机）
+- `goods-back-category`：必填，仅允许 `3`（训练）或 `4`（开发机），CLI 层已做枚举校验，其他值直接返回 exit 2
 
 `WARN`：
-- `page-num >= 1`
-- `page-size >= 1`
+- `page >= 1`
+- `limit >= 1`
 
 ### 16) `gm task image official` -> `GET /api/images/official/list`
 `STRICT`：
@@ -460,7 +579,7 @@ gm task edit --file ./edit-task.json
 
 `WARN`：
 - `version-status` 默认 `1`
-- 分页建议：`page-num >=1`, `page-size >=1`
+- 分页建议：`page >=1`, `limit >=1`
 
 ### 18) `gm task image versions` -> `GET /api/task/getImageVersion`
 `STRICT`：
@@ -482,12 +601,12 @@ gm task edit --file ./edit-task.json
 `STRICT`：
 - `task_id`：必填，长度 `1..20`
 - `data_key`：必填（先通过 `gm task data keys` 获取可用 key 列表）
-- `end_time`：必填，格式 `YYYY-MM-DD HH:mm:ss`，通常传**当前时间**
-- `sampling_mode`：必填，取值 `precise`（精细）或 `accelerate`（加速）
+- `sampling_mode`：必填，仅允许 `precise`（精细）或 `accelerate`（加速），CLI 层已做枚举校验，其他值直接返回 exit 2
   - 运行中的任务：只能使用 `precise`
   - 已完成/已终止的任务：可选 `precise` 或 `accelerate`
 
 `WARN`：
+- `end_time`：可选，格式 `YYYY-MM-DD HH:mm:ss`；不传时后端默认取当前时间
 - `max_data_points`：加速模式下建议传入，默认 `10000`，正整数；精细模式下可不传
 
 ### 22) `gm task data download` -> `GET /api/task/data/download/{task_id}`
@@ -551,6 +670,17 @@ gm task edit --file ./edit-task.json
 `WARN`：
 - `limit`：查询参数，默认 `200`
 
+### 33) `gm task note update` -> `POST /api/task/updateTaskNote` -> `UpdateTaskNoteModel`
+`STRICT`：
+- `taskId`：必填，长度 `1..20`
+
+`WARN`：
+- `taskNote`：建议必填（笔记内容，**HTML 格式**），无固定长度限制。前端使用 react-quill 渲染，必须传 HTML 标签（如 `<p>`、`<h3>`、`<ul><li>`、`<strong>`、`<table>` 等）
+
+### 34) `gm task note get` -> `POST /api/task/getTaskNote` -> `TaskIdModel`
+`STRICT`：
+- `task-id`：必填，长度 `1..20`
+
 ## 软限制执行规则（给 Agent）
 - 先按 `STRICT` 做预检，不通过则先提示修复示例后再执行。
 - `WARN` 只提醒，不阻塞；用户明确要求可带风险继续执行。
@@ -560,21 +690,70 @@ gm task edit --file ./edit-task.json
 - 默认不自动补全高风险业务字段（如 `goodsId`）；需向用户确认或回读既有任务信息后再填充。
 
 ## 批量操作（batch）
-- `gm task batch stop --task-ids "t1,t2,t3"`（高风险，默认确认）
-- `gm task batch delete --task-ids "t1,t2,t3"`（高风险，默认确认）
+- `gm --yes task batch stop --task-ids "t1,t2,t3"`（Agent 必须加 `--yes`）
+- `gm --yes task batch delete --task-ids "t1,t2,t3"`（Agent 必须加 `--yes`）
 
-无人值守脚本（用户明确要求时才用）：
+Agent 执行危险操作的推荐流程：
+```bash
+# 1. dry-run 预览（exit 10 → 通过）
+gm --yes task stop --task-id "task_xxx" --dry-run
+
+# 2. 正式执行（exit 0 → 成功）
+gm --yes task stop --task-id "task_xxx"
+```
+
+所有需要 `--yes` 的命令：
 - `gm --yes project delete --project-id "proj_xxx"`
 - `gm --yes task stop --task-id "task_xxx"`
 - `gm --yes task delete --task-id "task_xxx"`
 - `gm --yes task batch stop --task-ids "t1,t2"`
+- `gm --yes task batch delete --task-ids "t1,t2"`
 
 ## 输出与调试
-- 默认 stdout：JSON；`--human` 人类可读；`--quiet` 仅关键字段
+
+### 输出格式
+- 默认 stdout：JSON；`--human` 人类可读；`--quiet` 仅关键字段（去掉 meta/error 包裹）
 - `--debug` 开启调试日志
 - `--log-file ./gm.log` 将 stderr JSONL 写入文件
+- **Agent 调用时禁止使用 `--human`**：Agent 应始终使用默认 JSON 输出以便解析，`--human` 仅供用户在终端手动执行时使用
+
+### stdout / stderr 分离
+- **成功**：结构化 JSON 数据 → **stdout**
+- **失败**：结构化 JSON 错误 → **stderr**，stdout 无内容
+- Agent 可安全用管道处理 stdout 而不被错误信息干扰
+
+### 语义退出码
+Agent 应根据退出码决定下一步操作：
+
+| 退出码 | 含义 | Agent 行为 |
+|--------|------|-----------|
+| `0` | 成功 | 继续执行 |
+| `1` | 一般错误（网络、5xx） | 读 stderr，可重试 |
+| `2` | 参数无效 / 非交互拒绝 | 修正参数后重试 |
+| `3` | 资源未找到（404） | 跳过或创建 |
+| `4` | 权限不足（401/403） | 检查 API Key |
+| `5` | 冲突/已存在（409） | 跳过或更新 |
+| `10` | dry-run 预览通过 | 去掉 `--dry-run` 正式执行 |
+
+### 错误信息结构
+失败时 stderr 输出的 JSON 包含可操作字段：
+- `error.code`：机器可读错误类型（如 `INVALID_ARGUMENT`、`NON_INTERACTIVE`、`NETWORK_ERROR`）
+- `error.retryable`：`true` 表示可重试（网络/5xx），`false` 表示永久错误（参数错误）
+- `error.input`：导致失败的输入值回显，便于 Agent 定位并修正参数
+- `error.hint`：恢复建议
+
+### `--dry-run` 预览
+- 所有写操作（create/edit/run/stop/delete 等）支持 `--dry-run`
+- dry-run 成功时退出码为 **10**（非 0），输出将要发送的 method/endpoint/body/query
+- dry-run 也会先校验参数，参数错误仍返回退出码 2
+- 推荐 Agent 工作流：先 `--dry-run`（exit 10 → 通过）→ 去掉 `--dry-run` 正式执行（exit 0 → 成功）
 
 ## 常见报错快速处理
+- **exit 2 + `INVALID_ARGUMENT`**：参数错误，查看 `error.input` 回显的输入值和 `error.message` 修正参数
+- **exit 2 + `NON_INTERACTIVE`**：Agent 执行危险操作时忘加 `--yes`，补上即可
+- **exit 1 + `NETWORK_ERROR`**（`retryable: true`）：网络问题，可直接重试
+- **exit 4**：API Key 无效或权限不足，需 `gm auth login --api-key ...` 重新配置
+- **exit 10**：`--dry-run` 预览通过，去掉 `--dry-run` 正式执行
 - base_url 为空：先 `gm config set base_url "..."` 或设置 `GM_BASE_URL`
 - api key 为空：先 `gm auth login --api-key ...` 或设置 `GM_API_KEY`
 - 不确定参数：先跑 `gm <command> --help`
@@ -595,4 +774,3 @@ gm task edit --file ./edit-task.json
    - `startScript`、`isOpen`、`runParams`
 4. 仅修改需要变更的字段值，其余字段从 `task info` 返回中原样保留。
 5. 若 edit 返回 500 错误，**禁止盲目重试**，应先分析原因。
-
