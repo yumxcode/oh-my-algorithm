@@ -19,6 +19,18 @@ async function status({ cwd = process.cwd() } = {}) {
   const phase = inferPhase(cwd);
   log(`  ${color.bold(color.cyan(phase.current))}  ${color.gray('→')}  ${color.gray(phase.next)}`);
 
+  // ── 1b. Iteration Loop ────────────────────────────────────────────────────
+  const loopPath = path.join(OMA.dir(cwd), 'loop.json');
+  if (exists(loopPath)) {
+    const loop = readJSON(loopPath) || {};
+    section('Iteration Loop');
+    kv('Lap',        loop.lap != null ? `#${loop.lap}` : '—');
+    kv('Stage',      color.cyan(loop.stage || '—') + color.gray('  (design ↔ implement ↔ train ↔ tune — advisory)'));
+    kv('Exp',        loop.exp_id || '—');
+    if (loop.hypothesis) kv('Hypothesis', loop.hypothesis);
+    if (loop.updated_at) kv('Updated',    loop.updated_at.slice(0, 16).replace('T', ' '));
+  }
+
   // ── 2. Best Result ────────────────────────────────────────────────────────
   section('Best Result');
   const bestPath = OMA.best(cwd);
@@ -35,7 +47,7 @@ async function status({ cwd = process.cwd() } = {}) {
       kv('Evaluated at',  best.evaluated_at ? best.evaluated_at.slice(0, 16).replace('T', ' ') : '—');
     }
   } else {
-    info('No evaluation run yet', 'run $evaluate to populate best.json');
+    info('No evaluation run yet', 'run $tune (Phase 5 final eval) to populate best.json');
   }
 
   // ── 3. Leaderboard (top 8) ────────────────────────────────────────────────
@@ -154,7 +166,7 @@ function inferPhase(cwd) {
     return { current: 'train ✓', next: 'run $tune to improve' };
 
   if (!exists(OMA.best(cwd)))
-    return { current: 'tune ✓', next: 'run $evaluate' };
+    return { current: 'tune ✓', next: 'run $tune Phase 5 (final eval)' };
 
   const best = readJSON(OMA.best(cwd));
   if (!best?.deploy_gate_open)

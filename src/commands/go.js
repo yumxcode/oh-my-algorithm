@@ -10,7 +10,7 @@
 
 const fs   = require('fs');
 const path = require('path');
-const { OMA, exists, readJSON } = require('../utils/paths');
+const { OMA, exists, readJSON, nextExpId } = require('../utils/paths');
 const { header, section, ok, warn, fail, info, blank, log, kv, color } = require('../utils/print');
 
 const VALID_STAGES = [
@@ -22,6 +22,9 @@ const VALID_STAGES = [
   'deploy',
   'consolidate',
 ];
+
+// The four mutually-advisory stages that make up the iteration loop.
+const LOOP_STAGES = ['design', 'implement', 'train', 'tune'];
 
 // Context files each stage ideally needs — used to display availability
 const STAGE_CONTEXT = {
@@ -76,7 +79,7 @@ const STAGE_SKILL = {
   consolidate : '$consolidate',
 };
 
-async function go({ cwd = process.cwd(), stage, reason = '' } = {}) {
+async function go({ cwd = process.cwd(), stage, reason = '', startStage } = {}) {
   const standalonePath = path.join(OMA.dir(cwd), 'standalone.json');
 
   // ── oma go off ─────────────────────────────────────────────────────────────
@@ -112,6 +115,70 @@ async function go({ cwd = process.cwd(), stage, reason = '' } = {}) {
       blank();
       log(`  ${color.gray('Available stages:')} ${VALID_STAGES.join(', ')}`);
     }
+    blank();
+    return;
+  }
+
+  // ── oma go loop ────────────────────────────────────────────────────────────
+  // Enter the iteration loop directly, WITHOUT a prior $requirement. Waives the
+  // requirements-locked (enter-loop) hard gate, sets up the loop pointer, and
+  // hands you the cycle — not a single isolated stage.
+  if (stage === 'loop') {
+    if (!exists(OMA.dir(cwd))) {
+      fail('.oma/ not found', 'Run `oma setup` first to initialize the workspace');
+      blank();
+      process.exit(1);
+    }
+    const start = LOOP_STAGES.includes(startStage) ? startStage : 'design';
+
+    // 1. standalone.json — waive the requirement (enter-loop) hard gate.
+    fs.writeFileSync(standalonePath, JSON.stringify({
+      stage     : 'loop',
+      skill     : STAGE_SKILL[start],
+      mode      : 'loop',
+      enteredAt : new Date().toISOString(),
+      reason    : reason || 'entered iteration loop without $requirement (oma go loop)',
+    }, null, 2));
+
+    // 2. loop.json — create lap 1 if absent, else resume the existing loop.
+    const loopPath = path.join(OMA.dir(cwd), 'loop.json');
+    const now = new Date().toISOString();
+    let loop, resumed = false;
+    if (exists(loopPath)) {
+      loop = readJSON(loopPath) || {};
+      loop.stage = start;
+      loop.updated_at = now;
+      resumed = true;
+    } else {
+      loop = { lap: 1, stage: start, exp_id: nextExpId(cwd), hypothesis: reason || null, opened_at: now, updated_at: now };
+    }
+    fs.writeFileSync(loopPath, JSON.stringify(loop, null, 2) + '\n');
+
+    header('oma go loop — Entering Iteration Loop (Standalone Mode)');
+    blank();
+    log(`  ${color.yellow('⚠️  STANDALONE MODE')} — the ${color.bold('$requirement')} hard gate is ${color.bold('waived')}.`);
+    log(`  You are in the loop: ${color.cyan('$design ↔ $implement ↔ $train ↔ $tune')} — all advisory.`);
+    log(`  ${color.gray('The deploy gate (best.json deployGateOpen) still applies to exit the loop.')}`);
+    blank();
+
+    section('Loop');
+    kv('Lap',   `#${loop.lap}${resumed ? color.gray('  (resumed)') : ''}`);
+    kv('Stage', color.cyan(loop.stage));
+    kv('Exp',   loop.exp_id);
+    if (loop.hypothesis) kv('Hypothesis', loop.hypothesis);
+
+    section('Minimal Seed  (asked by the skill on entry — not blocking)');
+    const cfg = readJSON(path.join(OMA.dir(cwd), 'config.json')) || {};
+    const metricDir = cfg.metric_higher_is_better === false ? 'lower-is-better'
+                    : cfg.metric_higher_is_better === true  ? 'higher-is-better' : '—';
+    kv('Primary metric direction', `${metricDir}${color.gray('  (config.json metric_higher_is_better)')}`);
+    log(`  ${color.gray('The skill will confirm: primary metric, its direction, and robot/sim target')}`);
+    log(`  ${color.gray('(robot, sim_env, control_hz). Provide inline — no full $requirement needed.')}`);
+
+    blank();
+    section('Next Step');
+    log(`  Open a session and run: ${color.bold(color.cyan(STAGE_SKILL[start]))}`);
+    log(`  ${color.gray('To leave the loop / return to gated mode:')} ${color.cyan('oma go off')} ${color.gray('(keeps loop.json)')}`);
     blank();
     return;
   }

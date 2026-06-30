@@ -93,12 +93,49 @@ oma go off
 初始化 OMA 项目结构。
 
 ```bash
-oma setup
+oma setup                 # 默认 codex
+oma setup -p cursor       # 适配 Cursor
 ```
 
 在当前目录创建：
-- `.oma/` — 项目状态目录
-- `AGENTS.md` — Codex 主提示词（如不存在则从模板生成）
+- `.oma/` — 项目状态目录（所有平台共用）
+- `AGENTS.md` — 主提示词（如不存在则从模板生成）
+
+#### 平台 `-p`
+
+| 平台 | 行为规范层落点 | 路由方式 |
+|------|----------------|----------|
+| `codex`（默认） | `.oma/skills/*/SKILL.md` | `AGENTS.md` 关键词路由表 |
+| `meta-agent` | `.oma/skills/*/SKILL.md` | `AGENT.md` 关键词路由表 |
+| `cursor` | `.cursor/rules/oma-core.mdc` + `.cursor/skills/*/SKILL.md` | `alwaysApply` 规则 + skill frontmatter `description` 自动选用 |
+
+**为什么 cursor 不一样**：Cursor 不稳定加载根目录 `AGENTS.md`，也不认关键词路由表；它每轮注入 `.cursor/rules/*.mdc`（`alwaysApply`），并按 `.cursor/skills/*/SKILL.md` 的 frontmatter `description` 语义匹配自动选用 skill。因此 `oma setup -p cursor` 会：
+
+1. 把 `AGENTS.md`（STARTUP / 门控链 / 状态文件 / 路由）改写成 `.cursor/rules/oma-core.mdc`（`alwaysApply: true`，skill 路径指向 `.cursor/skills/`）；
+2. 给每个阶段 skill 注入 `name` + `description` frontmatter，写入 `.cursor/skills/<stage>/SKILL.md`（`gradmotion` 已自带 frontmatter 原样保留；废弃的 `evaluate` 不导出）；
+3. 仍写一份根目录 `AGENTS.md` 作 `@AGENTS.md` 兜底；
+4. `.oma/` 状态目录与 CLI（`oma go` / `status` / `doctor` 等）完全不变；
+5. `.gitignore` 默认忽略 OMA 生成的 `.cursor/rules/oma-core.mdc`、`.cursor/skills/`（保持私有，不影响你自己的 `.cursor/` 文件）。
+
+skill 的 `description` 文案由 `configs/cursor-skill-meta.json` 维护，可按需改触发话术。
+
+---
+
+### 自定义习惯：`--overlay`
+
+OMA 只规定**大过程**（门控/迭代环）和**各阶段沉淀的 skill**；`oma setup -p` 按平台机制生成
+agent 文件并放好 skill。如果你在某些子过程里有自己的习惯/自定义行为，**写成一个 markdown 文件**，
+用 `--overlay` 传入即可——OMA 原样追加到平台 agent 文件末尾，让 codex/cursor 看到。
+
+```bash
+oma setup -p cursor --overlay ./my-habits.md
+oma setup -p codex  --overlay ./my-habits.md
+```
+
+追加位置按平台：codex → `AGENTS.md` 末尾；cursor → `.cursor/rules/oma-core.mdc` 末尾；
+claude-code → `CLAUDE.md` 末尾。内容包在受管区
+`<!-- OMA:USER-OVERLAY:BEGIN…END -->` 里，重跑 `oma setup --overlay` 幂等替换，不重复。
+OMA 不解析这个文件——你写什么，agent 就看到什么。
 
 ---
 

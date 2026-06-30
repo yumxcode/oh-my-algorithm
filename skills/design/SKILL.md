@@ -2,9 +2,11 @@
 
 **Purpose**: AI + Human co-creation of robot algorithm design via three parallel idea streams. Produces a concrete, implementation-ready design document covering policy architecture, reward function, observation/action space, domain randomization, and training curriculum.
 
-**Gate in**: `.oma/knowledge.md` must exist and contain `Status: LOCKED`.
-**Standalone entry**: Allowed via `oma go design`. If knowledge.md is missing, ask the user for: task description, sim environment, hardware target, primary metric.
-**Gate out**: Creates `.oma/designs/design-{id}.md`. Gate to `$implement` opens only after this file exists.
+**Gate in (loop entry, HARD)**: `.oma/knowledge.md` must exist and contain `Status: LOCKED`. This is the only hard gate to enter the iteration loop. Once inside, `$design` may be re-entered any time (e.g. after a `$tune` analysis motivates a change) — do not treat re-entry as starting over.
+**First lap vs delta**: the **first lap** produces a full `design-{id}.md`. **Later laps** usually capture only a *delta* — the `hypothesis` + `change` of the lap (archive_level `light`); a fresh full design doc is required only for major changes (reward redesign, architecture swap → archive_level `full`).
+**Loop bookkeeping**: on entry, upsert `.oma/loop.json` — set `stage: design`; if this is a new change after a closed `$train`/`$tune` round, bump `lap` and allocate the next `exp_id`. See AGENTS.md › `.oma/loop.json` schema.
+**Standalone entry**: Allowed via `oma go design` / `oma go loop`. If knowledge.md is missing, ask the user for the **minimal loop seed**: task description, sim environment, hardware target, and primary metric + direction — write the direction to `.oma/config.json` `metric_higher_is_better`. If a codebase is registered (`oma index`), infer what you can first and only confirm. Do not run the full `$requirement` interview.
+**Gate out**: For a full lap, creates `.oma/designs/design-{id}.md`. For a delta lap, the change lives in the lap's `experiment.json`. `$implement` is **not** hard-gated on a fresh design doc inside the loop.
 **Experience library**: Two-file global library at `~/.oma/`. Lookup pattern:
 ```
 oma xp index --stage design --format md   # scan index first (lightweight)

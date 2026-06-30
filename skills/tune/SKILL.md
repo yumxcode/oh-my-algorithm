@@ -8,9 +8,14 @@ This skill subsumes the former `$evaluate` skill. Final test-set evaluation is t
 
 **Read also**: `.oma/skills/gradmotion/SKILL.md` — sweep experiments are also launched via `gm task create/run`, same as `$train`.
 
-**Gate in**: At least one `experiments/{exp-id}/results.json` with `phase: train` exists.
+**Tune-stage helper skills** (built-in; auto-selected by Cursor, keyword-routed by Codex):
+- `experiment-analysis` — analyse / compare experiment CSVs (base pose, leg amplitude & symmetry, tracking error, yaw drift). Use it in **Phase 3 (Collect and Analyse)** instead of ad-hoc parsing. Triggers: "分析 exp_XXX", "对比 exp_A exp_B", `/compare`.
+- `experiment-recording` — write results into the experiment archive (tiered archive, index.json, campaign, lessons). Use it when recording a finished run. Triggers: "记录 exp_XXX", `/update-lab`. Only writes to the archive layer — never to training code.
+
+**Gate in (loop, advisory)**: at least one `experiments/{exp-id}/results.json` with `phase: train` is the ideal input, but inside the iteration loop `$tune` is **not blocked** by its absence — only `requirements.md`/`knowledge.md` LOCKED is required. A `$tune` analysis that exposes a problem may go **straight back** to `$design`/`$implement` for the next lap (delta) — that is the normal loop, not a failure.
+**Loop bookkeeping**: on entry, upsert `.oma/loop.json` → `stage: tune` (keep the lap's `exp_id`).
 **Standalone entry**: Allowed via `oma go tune`. If no prior train results exist, ask user: "Do you have existing experiment results to sweep from? If yes, provide exp-id and metric. If no, we'll run a first baseline first."
-**Gate out**: `.oma/best.json` written with `deployGateOpen` field set. Appends to `trajectory.jsonl`. **Automatically triggers `$consolidate`.**
+**Gate out (loop exit, HARD)**: `.oma/best.json` written with `deployGateOpen` field set. Only `deployGateOpen === true` opens the hard gate to `$deploy`; otherwise stay in the loop. Appends to `trajectory.jsonl`. **Automatically triggers `$consolidate`.**
 **Experience library**: Two-file global library at `~/.oma/`. Lookup pattern:
 ```
 oma xp index --stage tune --format md    # scan index first (lightweight)

@@ -52,7 +52,7 @@ const HELP = {
 
   ${color.bold('Commands:')}
     ${color.cyan('setup')}                        Initialize .oma/ workspace in current directory
-    ${color.cyan('go <stage>')}                   Enter any stage directly (bypass gate enforcement)
+    ${color.cyan('go <stage> | go loop')}         Enter a stage directly, or the iteration loop (no requirement)
     ${color.cyan('extract --paper <path.pdf>')}   Extract paper → .oma/paper/ (run before $requirement)
     ${color.cyan('index --src <repo-path>')}      Index reference codebase → .oma/codebase/ ($design + $implement)
     ${color.cyan('search --topic "..."')}         Fetch papers from Semantic Scholar (Stream A seeds)
@@ -89,10 +89,26 @@ const HELP = {
   an initial config.json. Safe to run multiple times (skips existing files).
 
   ${color.bold('Options:')}
+    -p <platform>         Agent platform. Determines how stage prompts install.
+                            codex        → AGENTS.md + .oma/skills/  (default)
+                            meta-agent   → AGENT.md  + .oma/skills/
+                            cursor       → .cursor/rules + .cursor/skills (+ AGENTS.md fallback)
+                            claude-code  → CLAUDE.md + .claude/skills
+    --overlay <file.md>   Append a custom markdown file to the end of the generated
+                          agent file (AGENTS.md / oma-core.mdc / CLAUDE.md). Your
+                          per-stage habits go in that file; OMA appends it verbatim.
     --force               Overwrite existing template files
     --cwd <path>          Initialize in this directory instead of cwd
 
-  ${color.bold('Creates:')}
+  ${color.bold('Examples:')}
+    oma setup                      # default: generates AGENTS.md
+    oma setup -p codex             # same as default
+    oma setup -p meta-agent        # generates AGENT.md instead
+    oma setup -p cursor            # native Cursor layout (rules + frontmatter'd skills)
+    oma setup -p cursor --overlay ./my-habits.md   # + append your custom markdown
+
+  ${color.bold('Creates (codex / meta-agent):')}
+    AGENTS.md / AGENT.md  (agent prompt, determined by -p)
     .oma/requirements.md  (from template — fill via $requirement)
     .oma/memory.md        (empty Dead Ends / Working Patterns tables)
     .oma/config.json      (project name, default seeds, metric direction)
@@ -100,6 +116,12 @@ const HELP = {
     .oma/impl/            (directory for $implement outputs)
     .oma/experiments/     (directory for $train / $tune / $evaluate outputs)
     .gitignore            (appends .oma/experiments/ and other volatile state)
+
+  ${color.bold('Creates (cursor):')}
+    .cursor/rules/oma-core.mdc       (alwaysApply constitution from AGENTS.md)
+    .cursor/skills/<stage>/SKILL.md  (stage prompts + auto-select frontmatter)
+    AGENTS.md                        (@-fallback; Cursor auto-load is unstable)
+    .oma/  (state: requirements.md, memory.md, config.json, designs/, impl/, experiments/)
 `,
 
   go: `
@@ -117,15 +139,21 @@ const HELP = {
     tune          Enter $tune directly
     deploy        Enter $deploy directly
     consolidate   Enter $consolidate directly
-    off           Disable standalone mode (return to gated flow)
+    loop          Enter the iteration loop WITHOUT $requirement (waives the
+                  enter-loop hard gate, inits .oma/loop.json, gates advisory)
+    off           Disable standalone mode (return to gated flow; keeps loop.json)
     status        Show current standalone mode state
 
   ${color.bold('Options:')}
-    --reason "..."   Document why you're entering standalone mode
+    --stage <s>      Start stage for 'go loop' (design|implement|train|tune; default design)
+    --reason "..."   Document why you're entering standalone mode (becomes the
+                     first lap's hypothesis for 'go loop')
     --cwd <path>     Workspace directory (default: cwd)
 
   ${color.bold('Examples:')}
     oma go design                         # jump into $design
+    oma go loop                           # enter the loop, no requirement, start at $design
+    oma go loop --stage tune --reason "已有代码库，直接调 DR"
     oma go train --reason "testing infra"
     oma go off                            # return to normal gated flow
     oma go status                         # check if standalone mode is active
@@ -308,15 +336,16 @@ async function main() {
 
     case 'setup':
       if (hasFlag('-h', '--help')) { log(HELP.setup); return; }
-      await setup({ cwd, force: hasFlag('--force') });
+      await setup({ cwd, force: hasFlag('--force'), platform: flagValue('-p') || 'codex', overlay: flagValue('--overlay') });
       break;
 
     case 'go':
       if (hasFlag('-h', '--help')) { log(HELP.go); return; }
       await go({
         cwd,
-        stage : args[1] || 'status',
-        reason: flagValue('--reason') || '',
+        stage     : args[1] || 'status',
+        reason    : flagValue('--reason') || '',
+        startStage: flagValue('--stage') || (args[1] === 'loop' ? args[2] : undefined),
       });
       break;
 

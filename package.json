@@ -15,6 +15,7 @@
     "src/",
     "skills/",
     "templates/",
+    "configs/",
     "AGENTS.md"
   ],
   "scripts": {

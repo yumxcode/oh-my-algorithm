@@ -8,9 +8,10 @@ Two paths — selected automatically:
 
 **Earliest start**: After `$requirement` completes. Can start reading the codebase (Path A) in parallel with `$design`, but writing code requires the finalized `design-{id}.md`.
 
-**Gate in**: `.oma/designs/design-{id}.md` must exist before writing any code.
+**Gate in (loop, advisory)**: a current `design-{id}.md` is the ideal input, but inside the iteration loop `$implement` is **not blocked** by its absence — the only hard requirement is `requirements.md`/`knowledge.md` LOCKED. For a **delta lap**, take the change straight from `.oma/loop.json` `hypothesis` and the lap's `experiment.json` (no fresh design doc needed). A `$train` that surfaced a code bug re-enters here directly (Bug-Fix Re-entry).
+**Loop bookkeeping**: on entry, upsert `.oma/loop.json` → `stage: implement` (keep the lap's `exp_id`).
 **Standalone entry**: Allowed via `oma go implement`. If design is missing, ask user to paste the key design decisions (obs space, action space, reward terms, network arch, RL algorithm) inline.
-**Gate out**: `.oma/impl/impl-checklist.md` with all items `✓` **and** code pushed to GitHub. Gate to `$train` opens only then.
+**Gate out**: `.oma/impl/impl-checklist.md` with all items `✓` **and** code pushed to GitHub — this is the readiness signal for `$train`, advisory inside the loop (you may iterate before pushing).
 
 ---
 

@@ -4,9 +4,10 @@
 
 **Read first**: `.oma/skills/gradmotion/SKILL.md` — all `gm` command details, field rules, and safety constraints live there. This file covers only the OMA-specific workflow on top of gm.
 
-**Gate in**: `.oma/impl/impl-checklist.md` all `✓` AND `.oma/impl/github.json` exists (code pushed).
-**Standalone entry**: Allowed via `oma go train`. If `github.json` is missing, ask for: repoUrl, branch, commitHash, and entry point command.
-**Gate out**: `.oma/experiments/{exp-id}/results.json` written with `phase: train`. Gate to `$tune` opens after at least one successful train run.
+**Gate in (loop, advisory)**: pushed code (`.oma/impl/github.json` + checklist `✓`) is the ideal input, but inside the iteration loop `$train` is **not blocked** by its absence — only `requirements.md`/`knowledge.md` LOCKED is required. If `github.json` is missing, ask for: repoUrl, branch, commitHash, and entry point command.
+**Loop bookkeeping**: on entry, upsert `.oma/loop.json` → `stage: train` (keep the lap's `exp_id`). After the run, the turnaround is `experiment-analysis` → human confirm → `experiment-recording` → next lap.
+**Standalone entry**: Allowed via `oma go train`.
+**Gate out**: `.oma/experiments/{exp-id}/results.json` written with `phase: train`. Feeds `$tune`; inside the loop you may go straight to `$tune`/`experiment-analysis` or back to `$design`/`$implement`.
 
 ---
 

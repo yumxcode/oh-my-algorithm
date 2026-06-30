@@ -158,6 +158,12 @@ async function doctor({ cwd = process.cwd() } = {}) {
     warn('.oma/memory.md', 'Missing — will be created by $consolidate after first tune/evaluate');
   }
 
+  const loopPath = path.join(OMA.dir(cwd), 'loop.json');
+  if (exists(loopPath)) {
+    const loop = readJSON(loopPath) || {};
+    ok('.oma/loop.json', `Iteration loop — lap #${loop.lap ?? '?'} @ ${loop.stage || '?'}${loop.exp_id ? ` (${loop.exp_id})` : ''}`);
+  }
+
   // ── 2. Paper extraction status ───────────────────────────────────────────
   section('Paper Extraction (.oma/paper/)');
   const paperDir      = path.join(OMA.dir(cwd), 'paper');
@@ -210,19 +216,31 @@ async function doctor({ cwd = process.cwd() } = {}) {
     info('  Without this, $implement will use Path B (from scratch)');
   }
 
-  // ── 4. Gate chain ─────────────────────────────────────────────────────────
-  section('Gate Chain');
+  // ── 4. Gates + iteration loop ─────────────────────────────────────────────
+  // Two hard gates only: $requirement (enter loop) and the deploy gate
+  // (best.json deployGateOpen, exit loop). The four interior skills are a
+  // mutually-advisory cycle — a blocked interior "gate" is informational, not
+  // a stop.
+  section('Gates (2 hard) + Iteration Loop');
   blank();
 
-  let firstBlocked = null;
+  const LOOP_SKILLS = new Set(['$design', '$implement', '$train', '$tune']);
+  let reqLocked = false;
+  let deployGateOpen = false;
   for (const gate of GATES) {
     const { pass, detail } = gate.check(cwd);
+    const tag = gate.skill === '$requirement' ? ' [HARD · enter loop]'
+              : gate.skill === '$deploy'      ? ' [HARD · exit loop]'
+              :                                  ' [loop · advisory]';
     if (pass) {
-      ok(`${gate.skill}  →  ${gate.artifact}`, detail);
+      ok(`${gate.skill}${tag}`, detail);
+    } else if (LOOP_SKILLS.has(gate.skill)) {
+      warn(`${gate.skill}${tag}`, `${detail}  — advisory; re-enter any time`);
     } else {
-      fail(`${gate.skill}  →  ${gate.artifact}`, detail);
-      if (!firstBlocked) firstBlocked = gate;
+      fail(`${gate.skill}${tag}`, detail);
     }
+    if (gate.skill === '$requirement') reqLocked = pass;
+    if (gate.skill === '$tune')        deployGateOpen = pass;   // passes iff best.json deployGateOpen === true
   }
 
   // ── 5. Trajectory summary ─────────────────────────────────────────────────
@@ -261,17 +279,14 @@ async function doctor({ cwd = process.cwd() } = {}) {
   blank();
   if (exists(standalonePath)) {
     const s = readJSON(standalonePath) || {};
-    log(color.yellow(`  ⚠️  Standalone mode active — targeting ${color.bold(s.skill || s.stage || '?')}.`));
-    if (firstBlocked) {
-      log(color.gray(`  Blocked gates above are advisory only. Proceed with ${color.bold(s.skill || s.stage || '?')}.`));
-    } else {
-      log(color.green('  All gates open.'));
-    }
-  } else if (firstBlocked) {
-    log(color.yellow(`  Next action: run ${color.bold(firstBlocked.skill)} to advance the gate chain.`));
-    log(color.gray(`  Or run ${color.cyan(`oma go ${firstBlocked.skill.replace('$', '')}`)} to enter it directly (bypass gate).`));
+    log(color.yellow(`  ⚠️  Standalone mode active — targeting ${color.bold(s.skill || s.stage || '?')}. Gates advisory.`));
+  } else if (!reqLocked) {
+    log(color.yellow(`  Lock requirements: run ${color.bold('$requirement')} to enter the iteration loop.`));
+  } else if (!deployGateOpen) {
+    log(color.green('  Loop open.') + ` iterate ${color.bold('$design ↔ $implement ↔ $train ↔ $tune')} freely — no interior gates.`);
+    log(color.gray('  Exit to $deploy when best.json deployGateOpen === true (set in $tune Phase 5).'));
   } else {
-    log(color.green('  All gates open. Ready for deployment.'));
+    log(color.green('  Deploy gate OPEN — ready for $deploy.'));
   }
   blank();
 }

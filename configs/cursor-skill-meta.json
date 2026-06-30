@@ -1,0 +1,33 @@
+{
+  "_comment": "Cursor frontmatter (name + description) injected into .cursor/skills/<stage>/SKILL.md by `oma setup -p cursor`. The description is what Cursor uses to auto-select the skill from user intent, so it encodes the trigger phrasing from the AGENTS.md keyword routing table. Skills already carrying their own YAML frontmatter (e.g. gradmotion) are copied verbatim and need no entry here. Deprecated skills (evaluate) are intentionally omitted so Cursor never auto-loads them.",
+  "skills": {
+    "requirement": {
+      "name": "oma-requirement",
+      "description": "OMA stage 1. Use when defining the problem, clarifying requirements, or setting success criteria for a robot RL algorithm — including anchoring on a benchmark/paper and capturing project constraints (control frequency, DOF, hardware target, sim environment). Triggers: requirement, define problem, clarify, success criteria."
+    },
+    "design": {
+      "name": "oma-design",
+      "description": "OMA stage 2. Use when designing the algorithm: policy/network architecture, reward function, observation/action space, domain randomization, or training curriculum for a robot RL task. Triggers: design, architecture, reward design, policy design, network."
+    },
+    "implement": {
+      "name": "oma-implement",
+      "description": "OMA stage 3. Use when implementing/coding the approved design — RL environment, reward function, observation/action wrappers, policy network, training entry point, smoke test, and git push. Triggers: implement, code it, build pipeline, write trainer."
+    },
+    "train": {
+      "name": "oma-train",
+      "description": "OMA stage 4. Use when launching or monitoring a robot RL training run on Gradmotion (gm), collecting metric results, or routing training/code failures back to implement. Triggers: train, run training, launch experiment, start training."
+    },
+    "tune": {
+      "name": "oma-tune",
+      "description": "OMA stage 5. Use for hyperparameter sweeps, ablations, leaderboard ranking, final test-set evaluation, and the deploy-gate decision in a robot RL project. Triggers: tune, sweep, ablation, hyperparameter, evaluate, final eval."
+    },
+    "deploy": {
+      "name": "oma-deploy",
+      "description": "OMA stage 6. Use for sim2real deployment: gap analysis, round-based hardware test campaign, staged safety gates, per-issue identification plans, and adapted-parameter feedback for real robot policies. Triggers: deploy, sim2real, hardware test, real robot."
+    },
+    "consolidate": {
+      "name": "oma-consolidate",
+      "description": "OMA memory pass. Use when consolidating findings into .oma/memory.md after experiments — recording dead ends, working patterns, and durable institutional knowledge so they are not re-explored. Triggers: consolidate, update memory, record findings."
+    }
+  }
+}
